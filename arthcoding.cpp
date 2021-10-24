@@ -7,6 +7,7 @@
 #include <memory>
 #include <map>
 #include <limits>
+#include <filesystem>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -14,8 +15,6 @@
 #include <unistd.h>
 
 #include "debug.h"
-
-using namespace std;
 
 struct symbol_range {
    unsigned int occurences;
@@ -35,14 +34,14 @@ void scan_options (int argc, char** argv) {
          case '?':
 
          default:
-            cerr << "-" << char (optopt) << ": invalid option";
+            std::cerr << "-" << char (optopt) << ": invalid option" << std::endl;
             break;
       }
    }
    //debugflags::setflags ("y");
 }
 
-// TODO: 
+// TODO:
 // eliminate unnecessary intermediate variables where necessary
 // read file contents in chunks
 
@@ -60,29 +59,29 @@ void scan_options (int argc, char** argv) {
    }
 }*/
 
-void compress_file(char * in_filename, char * out_filename) {
-   ifstream instream({in_filename}, ifstream::binary);
-   ofstream outstream({out_filename}, ofstream::binary);
+void compress_file(std::string in_filename, std::string out_filename) {
+   std::ifstream instream(in_filename, std::ifstream::binary);
+   std::ofstream outstream(out_filename, std::ofstream::binary);
    struct stat buf;
    const unsigned int ZERO = 0;
 
-   if ((instream.rdstate() & ifstream::failbit) != 0) {
-      cerr << "Failed to open file " << in_filename << endl;
+   if ((instream.rdstate() & std::ifstream::failbit) != 0) {
+       std::cerr << "Failed to open file " << in_filename << std::endl;
       return;
    }
 
-   if ((outstream.rdstate() & ofstream::failbit) != 0) {
-      cerr << "Failed to open file " << out_filename << endl;
+   if ((outstream.rdstate() & std::ofstream::failbit) != 0) {
+       std::cerr << "Failed to open file " << out_filename << std::endl;
       return;
    }
 
-   stat(in_filename, &buf);
+   stat(in_filename.c_str(), &buf);
    char * file_contents = new char[buf.st_size];
    instream.read(file_contents, buf.st_size);
 
    DEBUGF('y', "file is " << buf.st_size << " bytes long");
 
-   map<char, symbol_range> symbols;
+   std::map<char, symbol_range> symbols;
 
    for(int i = 0 ; i < buf.st_size ; ++i) {
       char current = file_contents[i];
@@ -122,17 +121,17 @@ void compress_file(char * in_filename, char * out_filename) {
          << " : " << x.second.occurences);
 
    //should be 0xFFFFFFFF
-   unsigned int upper_bound = numeric_limits<unsigned int>::max();
+   unsigned int upper_bound = std::numeric_limits<unsigned int>::max();
    unsigned int lower_bound = 0;
    unsigned int range;
    unsigned int pending = 0;
    unsigned char buffer = 0;
    unsigned char buffer_counter = 0;
 
-   DEBUGF('a', hex << showbase);
-   DEBUGF('y', hex << showbase);
-   DEBUGF('x', hex << showbase);
-   DEBUGF('b', hex << showbase);
+   DEBUGF('a', std::hex << std::showbase);
+   DEBUGF('y', std::hex << std::showbase);
+   DEBUGF('x', std::hex << std::showbase);
+   DEBUGF('b', std::hex << std::showbase);
 
    DEBUGF('y', "total chars in hex: " << buf.st_size);
 
@@ -145,8 +144,8 @@ void compress_file(char * in_filename, char * out_filename) {
       upper_bound = lower_bound + (range / buf.st_size * symbols[current].upper);
       lower_bound = lower_bound + (range / buf.st_size * symbols[current].lower);
 
-      DEBUGF('z', "  range for symbol " << static_cast<unsigned int>(current) << ": " << hex <<
-         showbase << lower_bound << " to " << hex << showbase << upper_bound);
+      DEBUGF('z', "  range for symbol " << static_cast<unsigned int>(current) << ": " << std::hex <<
+         std::showbase << lower_bound << " to " << std::hex << std::showbase << upper_bound);
 
       // runs while the first bit of bounds matches or pending bits are detected
       for(;;) {
@@ -236,7 +235,7 @@ void compress_file(char * in_filename, char * out_filename) {
             ++pending;
          }
          else {
-            DEBUGF('z', "  adjusted range   " << static_cast<unsigned int>(current) << ": " << hex << showbase << lower_bound << " to " << hex << showbase <<upper_bound);
+            DEBUGF('z', "  adjusted range   " << static_cast<unsigned int>(current) << ": " << std::hex << std::showbase << lower_bound << " to " << std::hex << std::showbase << upper_bound);
             break;
          }
       }
@@ -260,23 +259,23 @@ void compress_file(char * in_filename, char * out_filename) {
 }
 
 void decompress_file(char * in_filename, char * out_filename) {
-   ifstream instream({in_filename}, ifstream::binary);
-   ofstream outstream({out_filename}, ofstream::binary);
+    std::ifstream instream(in_filename, std::ifstream::binary);
+    std::ofstream outstream(out_filename, std::ofstream::binary);
    DEBUGF('z', "decompressing file");
 
-   if ((instream.rdstate() & ifstream::failbit) != 0) {
-      cerr << "Failed to open file " << in_filename << endl;
+   if ((instream.rdstate() & std::ifstream::failbit) != 0) {
+       std::cerr << "Failed to open file " << in_filename << std::endl;
       return;
    }
 
-   if ((outstream.rdstate() & ofstream::failbit) != 0) {
-      cerr << "Failed to open file " << out_filename << endl;
+   if ((outstream.rdstate() & std::ofstream::failbit) != 0) {
+       std::cerr << "Failed to open file " << out_filename << std::endl;
       return;
    }
 
    DEBUGF('z', "reading table");
 
-   map<char, symbol_range> symbols;
+   std::map<char, symbol_range> symbols;
    unsigned int occurences;
    char symbol;
 
@@ -303,7 +302,7 @@ void decompress_file(char * in_filename, char * out_filename) {
       cumulative_lower_bound += occurences;
    }
 
-   DEBUGF('y', hex << showbase);
+   DEBUGF('y', std::hex << std::showbase);
 
    for(auto& x : symbols) {
       DEBUGF('y', x.first << " : " << static_cast<unsigned int>(x.first)
@@ -312,7 +311,7 @@ void decompress_file(char * in_filename, char * out_filename) {
    DEBUGF('y', "total characters: " << cumulative_lower_bound);
 
    //should be 0xFFFFFFFF
-   unsigned int upper_bound = numeric_limits<unsigned int>::max();
+   unsigned int upper_bound = std::numeric_limits<unsigned int>::max();
    unsigned int lower_bound = 0;
    unsigned int range;
    unsigned int encoding = 0;
@@ -344,7 +343,7 @@ void decompress_file(char * in_filename, char * out_filename) {
          unsigned int lower_given_x = lower_bound + (range / cumulative_lower_bound * x.second.lower);
 
          DEBUGF('z', "     range given that " << static_cast<unsigned int>(x.first) << " occured: "
-            << hex << showbase << lower_given_x << " to " << hex << showbase << upper_given_x);
+            << std::hex << std::showbase << lower_given_x << " to " << std::hex << std::showbase << upper_given_x);
 
          if(encoding < upper_given_x && encoding >= lower_given_x){
             c = x.first;
@@ -390,7 +389,7 @@ void decompress_file(char * in_filename, char * out_filename) {
 
          // refreshes buffer if all bits have been read
          if(buffer_counter >= 8) {
-            if(instream.rdstate() & ifstream::eofbit != 0) {
+            if((instream.rdstate() & std::ifstream::eofbit) != 0) {
                buffer = 0;
             }
             instream.read((char *)(&buffer), 1);
@@ -412,7 +411,9 @@ void decompress_file(char * in_filename, char * out_filename) {
 int main (int argc, char** argv) {
    //maybe change to ios_base::binary to allow
    //binary files to be compressed
+   if (argc < 3) return EXIT_FAILURE;
    scan_options(argc, argv);
+   if (optind + 3 > argc) return EXIT_FAILURE;
 
    if(strcmp(argv[optind],"decode") == 0) {
       decompress_file(argv[optind + 1], argv[optind + 2]);
@@ -421,7 +422,7 @@ int main (int argc, char** argv) {
       compress_file(argv[optind + 1], argv[optind + 2]);
    }
    else {
-      cerr << "Usage: ./arcode [- @ flag]... encode|decode \'infile\' \'outfile\'" << endl;
+       std::cerr << "Usage: ./arcode [- @ flag]... encode|decode \'infile\' \'outfile\'" << std::endl;
       return 1;
    }
 }

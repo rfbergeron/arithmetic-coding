@@ -1,13 +1,9 @@
-// John Gnanasekaran (jgnanase) and Robert Bergeron (rbergero)
-// $Id: debug.h,v 1.1 2018-01-25 14:09:09-08 - - $
-
 #ifndef __DEBUG_H__
 #define __DEBUG_H__
 
 #include <bitset>
-#include <climits>
 #include <string>
-using namespace std;
+#include <limits>
 
 // debug -
 //    static class for maintaining global debug flags, each indicated
@@ -21,10 +17,10 @@ using namespace std;
 
 class debugflags {
    private:
-      using flagset = bitset<UCHAR_MAX + 1>;
+      using flagset = std::bitset<std::numeric_limits<char>::max() + 1>;
       static flagset flags;
    public:
-      static void setflags (const string& optflags);
+      static void setflags (const std::string& optflags);
       static bool getflag (char flag);
 };
 
@@ -44,7 +40,7 @@ class debugflags {
 #else
 #define DEBUGF(FLAG,CODE) { \
            if (debugflags::getflag (FLAG)) { \
-              cerr << CODE << endl; \
+              std::cerr << CODE << std::endl; \
            } \
         }
 #define DEBUGS(FLAG,STMT) { \
