@@ -17,9 +17,9 @@
 #include "debug.h"
 
 struct symbol_range {
-  unsigned int occurences;
-  unsigned int upper;
-  unsigned int lower;
+  uint32_t occurences;
+  uint32_t upper;
+  uint32_t lower;
 };
 
 void scan_options(int argc, char **argv) {
@@ -64,7 +64,6 @@ void compress_file(std::string in_filename, std::string out_filename) {
   std::ifstream instream(in_filename, std::ifstream::binary);
   std::ofstream outstream(out_filename, std::ofstream::binary);
   struct stat buf;
-  const unsigned int ZERO = 0;
 
   if ((instream.rdstate() & std::ifstream::failbit) != 0) {
     std::cerr << "Failed to open file " << in_filename << std::endl;
@@ -97,7 +96,7 @@ void compress_file(std::string in_filename, std::string out_filename) {
 
   // builds symbol table and writes it to outfile as it
   // constructs it
-  unsigned int cumulative_lower_bound = 0;
+  uint32_t cumulative_lower_bound = 0;
 
   for (auto &x : symbols) {
     x.second.lower = cumulative_lower_bound;
@@ -108,27 +107,28 @@ void compress_file(std::string in_filename, std::string out_filename) {
     outstream.write(reinterpret_cast<char const *>(&x.second.occurences),
                     sizeof(x.second.occurences));
 
-    DEBUGF('b', "symbol: " << static_cast<unsigned int>(x.first)
+    DEBUGF('b', "symbol: " << static_cast<uint32_t>(x.first)
                            << " lower bound: " << x.second.lower
                            << " upper bound: " << x.second.upper);
   }
 
   // writes a NUL character entry with 0 occurences to denote that
   // the table has ended
+  const uint32_t ZERO = 0;
   outstream.write(reinterpret_cast<char const *>(&ZERO), 1);
   outstream.write(reinterpret_cast<char const *>(&ZERO), sizeof(ZERO));
 
   for (auto &x : symbols)
-    DEBUGF('y', x.first << " : " << static_cast<unsigned int>(x.first) << " : "
+    DEBUGF('y', x.first << " : " << static_cast<uint32_t>(x.first) << " : "
                         << x.second.occurences);
 
   // should be 0xFFFFFFFF
-  unsigned int upper_bound = std::numeric_limits<unsigned int>::max();
-  unsigned int lower_bound = 0;
-  unsigned int range;
-  unsigned int pending = 0;
-  unsigned char buffer = 0;
-  unsigned char buffer_counter = 0;
+  uint32_t upper_bound = std::numeric_limits<uint32_t>::max();
+  uint32_t lower_bound = 0;
+  uint32_t range = upper_bound - lower_bound;
+  uint32_t pending = 0;
+  uint8_t buffer = 0;
+  uint8_t buffer_counter = 0;
 
   DEBUGF('a', std::hex << std::showbase);
   DEBUGF('y', std::hex << std::showbase);
@@ -147,7 +147,7 @@ void compress_file(std::string in_filename, std::string out_filename) {
     upper_bound = lower_bound + (range / buf.st_size * symbols[current].upper);
     lower_bound = lower_bound + (range / buf.st_size * symbols[current].lower);
 
-    DEBUGF('z', "  range for symbol " << static_cast<unsigned int>(current)
+    DEBUGF('z', "  range for symbol " << static_cast<uint32_t>(current)
                                       << ": " << std::hex << std::showbase
                                       << lower_bound << " to " << std::hex
                                       << std::showbase << upper_bound);
@@ -227,7 +227,7 @@ void compress_file(std::string in_filename, std::string out_filename) {
       }
       // pending bits
       else if (lower_bound >= 0x40000000 && upper_bound < 0xC0000000U) {
-        DEBUGF('x', "chosen symbol: " << static_cast<unsigned char>(current)
+        DEBUGF('x', "chosen symbol: " << static_cast<uint8_t>(current)
                                       << " adding pending bit");
         DEBUGF('v', "     " << lower_bound << " " << upper_bound);
         // preserve first bit since it is undecided and discard second one
@@ -237,7 +237,7 @@ void compress_file(std::string in_filename, std::string out_filename) {
         upper_bound = upper_bound | 0x80000001U;
         ++pending;
       } else {
-        DEBUGF('z', "  adjusted range   " << static_cast<unsigned int>(current)
+        DEBUGF('z', "  adjusted range   " << static_cast<uint32_t>(current)
                                           << ": " << std::hex << std::showbase
                                           << lower_bound << " to " << std::hex
                                           << std::showbase << upper_bound);
@@ -249,10 +249,10 @@ void compress_file(std::string in_filename, std::string out_filename) {
   // fill out the buffer with the bits of the lower bound,
   // then add 1
   if (buffer_counter > 0) {
-    DEBUGF('z', "buffer is only " << static_cast<unsigned int>(buffer)
+    DEBUGF('z', "buffer is only " << static_cast<uint32_t>(buffer)
                                   << ", need " << (8 - buffer_counter)
                                   << " more bytes");
-    unsigned int midpoint = lower_bound + (range / 2);
+    uint32_t midpoint = lower_bound + (range / 2);
     while (buffer_counter < 8) {
       buffer = buffer << 1;
       buffer |= ((midpoint >> 31) & 0x00000001);
@@ -283,11 +283,11 @@ void decompress_file(char *in_filename, char *out_filename) {
   DEBUGF('z', "reading table");
 
   std::map<char, symbol_range> symbols;
-  unsigned int occurences;
+  uint32_t occurences;
   char symbol;
 
   // also serves as the total number of characters in the original file
-  unsigned int cumulative_lower_bound = 0;
+  uint32_t cumulative_lower_bound = 0;
 
   for (;;) {
     // reads symbol
@@ -300,7 +300,7 @@ void decompress_file(char *in_filename, char *out_filename) {
     // table has ended
     if (occurences == 0) break;
 
-    DEBUGF('y', "character " << static_cast<unsigned int>(symbol) << "occured "
+    DEBUGF('y', "character " << static_cast<uint32_t>(symbol) << "occured "
                              << occurences << " times");
 
     symbols[symbol] = {occurences, cumulative_lower_bound + occurences,
@@ -312,19 +312,19 @@ void decompress_file(char *in_filename, char *out_filename) {
   DEBUGF('y', std::hex << std::showbase);
 
   for (auto &x : symbols) {
-    DEBUGF('y', x.first << " : " << static_cast<unsigned int>(x.first) << " : "
+    DEBUGF('y', x.first << " : " << static_cast<uint32_t>(x.first) << " : "
                         << x.second.lower << " to " << x.second.upper);
   }
   DEBUGF('y', "total characters: " << cumulative_lower_bound);
 
   // should be 0xFFFFFFFF
-  unsigned int upper_bound = std::numeric_limits<unsigned int>::max();
-  unsigned int lower_bound = 0;
-  unsigned int range;
-  unsigned int encoding = 0;
-  unsigned char buffer;
-  unsigned char buffer_counter = 8;
-  unsigned int characters_written = 0;
+  uint32_t upper_bound = std::numeric_limits<uint32_t>::max();
+  uint32_t lower_bound = 0;
+  uint32_t range = upper_bound - lower_bound;
+  uint32_t encoding = 0;
+  uint8_t buffer;
+  uint8_t buffer_counter = 8;
+  uint32_t characters_written = 0;
 
   // reads the first 4 bytes of the encoded file
   // to fill the encoding variable for comparison
@@ -341,18 +341,18 @@ void decompress_file(char *in_filename, char *out_filename) {
     DEBUGF('z', "available range: " << range);
     DEBUGF('z', "encoding: " << encoding)
     char c;
-    unsigned int encoding_length = 0;
+    uint32_t encoding_length = 0;
 
     for (auto &x : symbols) {
       // computes what the bounds would be given that x was encoded
       // and sees if the actual encoding falls within them
-      unsigned int upper_given_x =
+      uint32_t upper_given_x =
           lower_bound + (range / cumulative_lower_bound * x.second.upper);
-      unsigned int lower_given_x =
+      uint32_t lower_given_x =
           lower_bound + (range / cumulative_lower_bound * x.second.lower);
 
       DEBUGF('z', "     range given that "
-                      << static_cast<unsigned int>(x.first) << " occured: "
+                      << static_cast<uint32_t>(x.first) << " occured: "
                       << std::hex << std::showbase << lower_given_x << " to "
                       << std::hex << std::showbase << upper_given_x);
 
@@ -408,7 +408,7 @@ void decompress_file(char *in_filename, char *out_filename) {
         buffer_counter = 0;
       }
 
-      unsigned char current_bit = (buffer >> (7 - buffer_counter)) & 0x1;
+      uint32_t current_bit = (buffer >> (7 - buffer_counter)) & 0x1;
       encoding <<= 1;
       encoding += current_bit;
       ++buffer_counter;
