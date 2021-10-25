@@ -2,8 +2,8 @@
 #define __DEBUG_H__
 
 #include <bitset>
-#include <string>
 #include <limits>
+#include <string>
 
 // debug -
 //    static class for maintaining global debug flags, each indicated
@@ -16,15 +16,15 @@
 //    Not to be called by user code.
 
 class debugflags {
-   private:
-      using flagset = std::bitset<std::numeric_limits<char>::max() + 1>;
-      static flagset flags;
-   public:
-      static void setflags (const std::string& optflags);
-      static bool getflag (char flag);
+ private:
+  using flagset = std::bitset<std::numeric_limits<char>::max() + 1>;
+  static flagset flags;
+
+ public:
+  static void setflags(const std::string& optflags);
+  static bool getflag(char flag);
 };
 
-
 // DEBUGF -
 //    Macro which expands into debug code.  First argument is a
 //    debug flag char, second argument is output code that can
@@ -35,19 +35,21 @@ class debugflags {
 //    Traces are preceded by filename, line number, and function.
 
 #ifdef NDEBUG
-#define DEBUGF(FLAG,CODE) ;
-#define DEBUGS(FLAG,STMT) ;
+#define DEBUGF(FLAG, CODE) ;
+#define DEBUGS(FLAG, STMT) ;
 #else
-#define DEBUGF(FLAG,CODE) { \
-           if (debugflags::getflag (FLAG)) { \
-              std::cerr << CODE << std::endl; \
-           } \
-        }
-#define DEBUGS(FLAG,STMT) { \
-           if (debugflags::getflag (FLAG)) { \
-              STMT; \
-           } \
-        }
+#define DEBUGF(FLAG, CODE)            \
+  {                                   \
+    if (debugflags::getflag(FLAG)) {  \
+      std::cerr << CODE << std::endl; \
+    }                                 \
+  }
+#define DEBUGS(FLAG, STMT)           \
+  {                                  \
+    if (debugflags::getflag(FLAG)) { \
+      STMT;                          \
+    }                                \
+  }
 #endif
 
 #endif

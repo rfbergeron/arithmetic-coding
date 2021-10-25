@@ -1,7 +1,7 @@
 GPPWARN     = -Wall -Wextra -Werror -Wpedantic -Wshadow -Wold-style-cast
 GPPOPTS     = ${GPPWARN}
-COMPILECPP  = g++ -std=gnu++17
-MAKEDEPCPP  = g++ -std=gnu++17 -MM ${GPPOPTS}
+COMPILECPP  = g++ -std=c++17
+MAKEDEPCPP  = g++ -std=c++17 -MM ${GPPOPTS}
 
 MODULES     = debug
 EXECBIN     = arcode
@@ -36,3 +36,6 @@ test:
 	- ./arcode encode 0p3r4t0r 0p3r4t0r.yeet
 	- ./arcode decode entropy.yeet entropy.decode
 	- ./arcode decode 0p3r4t0r.yeet 0p3r4t0r.decode
+
+format:
+	- clang-format -i --style=Google ${OBJECTS}
