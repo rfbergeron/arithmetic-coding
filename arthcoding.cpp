@@ -105,8 +105,9 @@ void compress_file(std::string in_filename, std::string out_filename) {
   uint32_t lower_bound = 0;
   uint32_t range = upper_bound - lower_bound;
   uint32_t pending = 0;
-  uint8_t buffer = 0;
-  uint8_t buffer_counter = 0;
+  uint32_t buffer = 0;
+  int buffer_counter = 0;
+  const int buffer_bits = std::numeric_limits<uint32_t>::digits;
 
   uint32_t in_size = std::filesystem::file_size(in_path);
   DEBUGF('y', "STL says the file is " << in_size << " bytes long");
@@ -129,9 +130,9 @@ void compress_file(std::string in_filename, std::string out_filename) {
     for (;;) {
       // first bit one
       if (upper_bound >= 0x80000000U && lower_bound >= 0x80000000U) {
-        if (buffer_counter >= 8) {
+        if (buffer_counter >= buffer_bits) {
           DEBUGF('b', "writing " << buffer << " to file");
-          outstream.write(reinterpret_cast<char *>(&buffer), 1);
+          outstream.write(reinterpret_cast<char *>(&buffer), sizeof(buffer));
           buffer = buffer_counter = 0;
         }
 
@@ -153,9 +154,9 @@ void compress_file(std::string in_filename, std::string out_filename) {
         // write_pending(&buffer, buffer_counter, 1, pending, outstream);
 
         while (pending > 0) {
-          if (buffer_counter >= 8) {
+          if (buffer_counter >= buffer_bits) {
             DEBUGF('b', "writing " << buffer << "pending bits to file");
-            outstream.write(reinterpret_cast<char *>(&buffer), 1);
+            outstream.write(reinterpret_cast<char *>(&buffer), sizeof(buffer));
             buffer = buffer_counter = 0;
           }
           buffer <<= 1;
@@ -165,9 +166,9 @@ void compress_file(std::string in_filename, std::string out_filename) {
       }
       // first bit zero
       else if (upper_bound < 0x80000000U && lower_bound < 0x80000000U) {
-        if (buffer_counter >= 8) {
+        if (buffer_counter >= buffer_bits) {
           DEBUGF('b', "writing " << buffer << " to file");
-          outstream.write(reinterpret_cast<char *>(&buffer), 1);
+          outstream.write(reinterpret_cast<char *>(&buffer), sizeof(buffer));
           buffer = buffer_counter = 0;
         }
         // writes a zero to the end of the buffer
@@ -187,9 +188,9 @@ void compress_file(std::string in_filename, std::string out_filename) {
         // write_pending(&buffer, buffer_counter, 0, pending, outstream);
 
         while (pending > 0) {
-          if (buffer_counter >= 8) {
+          if (buffer_counter >= buffer_bits) {
             DEBUGF('b', "writing " << buffer << "pending bits to file");
-            outstream.write(reinterpret_cast<char *>(&buffer), 1);
+            outstream.write(reinterpret_cast<char *>(&buffer), sizeof(buffer));
             buffer = buffer_counter = 0;
           }
           buffer <<= 1;
@@ -220,19 +221,18 @@ void compress_file(std::string in_filename, std::string out_filename) {
     }
   }
 
-  // fill out the buffer with the bits of the lower bound,
-  // then add 1
+  // fill out the buffer with the bits of the lower bound
   if (buffer_counter > 0) {
     DEBUGF('z', "buffer is only " << static_cast<uint32_t>(buffer) << ", need "
-                                  << (8 - buffer_counter) << " more bytes");
+                                  << (buffer_bits - buffer_counter) << " more bits");
     uint32_t midpoint = lower_bound + (range / 2);
-    while (buffer_counter < 8) {
-      buffer = buffer << 1;
+    while (buffer_counter < buffer_bits) {
+      buffer <<= 1;
       buffer |= ((midpoint >> 31) & 0x00000001);
       midpoint <<= 1;
       ++buffer_counter;
     }
-    outstream.write(reinterpret_cast<char *>(&buffer), 1);
+    outstream.write(reinterpret_cast<char *>(&buffer), sizeof(buffer));
   }
 
   DEBUGF('z', "finished encoding");
@@ -263,30 +263,23 @@ void decompress_file(std::string in_filename, std::string out_filename) {
   // also serves as the total number of characters in the original file
   uint32_t cumulative_lower_bound = 0;
 
+  DEBUGF('y', std::hex << std::showbase);
   while (instream.get(symbol)) {
     instream.read(reinterpret_cast<char *>(&occurences), 4);
 
     // table has ended
     if (occurences == 0) break;
 
-    DEBUGF('y', "character " << static_cast<uint32_t>(symbol) << "occured "
-                             << occurences << " times");
+    DEBUGF('y', "character " << symbol << "occured " << occurences << " times");
 
     symbols[symbol] = {occurences, cumulative_lower_bound + occurences,
                        cumulative_lower_bound};
-
     cumulative_lower_bound += occurences;
   }
 
-  DEBUGF('y', std::hex << std::showbase);
+  DEBUGF('y', std::dec << std::noshowbase);
+  DEBUGF('y', "Total characters: " << cumulative_lower_bound);
 
-  for (auto &x : symbols) {
-    DEBUGF('y', x.first << " : " << static_cast<uint32_t>(x.first) << " : "
-                        << x.second.lower << " to " << x.second.upper);
-  }
-  DEBUGF('y', "total characters: " << cumulative_lower_bound);
-
-  // should be 0xFFFFFFFF
   uint32_t upper_bound = std::numeric_limits<uint32_t>::max();
   uint32_t lower_bound = 0;
   uint32_t range = upper_bound - lower_bound;
@@ -304,6 +297,7 @@ void decompress_file(std::string in_filename, std::string out_filename) {
     encoding <<= 8;
     encoding |= buffer;
   }
+  DEBUGF('y', std::hex << std::showbase);
 
   for (;;) {
     range = upper_bound - lower_bound;
@@ -321,9 +315,9 @@ void decompress_file(std::string in_filename, std::string out_filename) {
           lower_bound + (range / cumulative_lower_bound * x.second.lower);
 
       DEBUGF('z', "     range given that "
-                      << static_cast<uint32_t>(x.first) << " occured: "
-                      << std::hex << std::showbase << lower_given_x << " to "
-                      << std::hex << std::showbase << upper_given_x);
+                      << x.first << " occured: "
+                      << lower_given_x << " to "
+                      << upper_given_x);
 
       if (encoding < upper_given_x && encoding >= lower_given_x) {
         c = x.first;
