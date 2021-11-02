@@ -185,7 +185,6 @@ void compress_file(std::string in_filename, std::string out_filename) {
   }
 
   DEBUGF('z', "finished encoding");
-  outstream.close();
 }
 
 void decompress_file(std::string in_filename, std::string out_filename) {
@@ -232,22 +231,16 @@ void decompress_file(std::string in_filename, std::string out_filename) {
   uint32_t upper_bound = std::numeric_limits<uint32_t>::max();
   uint32_t lower_bound = 0;
   uint32_t range = upper_bound - lower_bound;
-  uint32_t encoding = 0;
-  uint32_t first_bit = 0x00000001U
-                       << (std::numeric_limits<uint32_t>::digits - 1);
-  uint8_t buffer;
-  uint8_t buffer_counter = 8;
+  uint32_t encoding;
+  uint32_t buffer;
+  int buffer_counter = 0;
+  int buffer_bits = std::numeric_limits<uint32_t>::digits;
+  uint32_t first_bit = 0x00000001U << buffer_bits;
   uint32_t characters_written = 0;
 
-  // reads the first 4 bytes of the encoded file
-  // to fill the encoding variable for comparison
-  // cannot read directly to int because it was
-  // encoded byte by byte
-  for (int i = 0; i < 4; ++i) {
-    instream.read(reinterpret_cast<char *>(&buffer), 1);
-    encoding <<= 8;
-    encoding |= buffer;
-  }
+  // fill encoding and buffer
+  instream.read(reinterpret_cast<char *>(&encoding), sizeof(encoding));
+  instream.read(reinterpret_cast<char *>(&buffer), sizeof(buffer));
   DEBUGF('y', std::hex << std::showbase);
 
   for (;;) {
@@ -302,7 +295,8 @@ void decompress_file(std::string in_filename, std::string out_filename) {
         upper_bound <<= 1;
         upper_bound |= 0x00000001U;
         encoding <<= 1;
-        uint32_t current_bit = (buffer >> (7 - buffer_counter)) & 0x00000001U;
+        uint32_t current_bit =
+            (buffer >> (buffer_bits - 1 - buffer_counter)) & 0x00000001U;
         encoding |= current_bit;
         ++buffer_counter;
         ++encoding_length;
@@ -317,7 +311,8 @@ void decompress_file(std::string in_filename, std::string out_filename) {
             (0x00000001U << (std::numeric_limits<uint32_t>::digits - 1));
         encoding <<= 1;
         encoding |= encoding_msb;
-        uint32_t current_bit = (buffer >> (7 - buffer_counter)) & 0x00000001U;
+        uint32_t current_bit =
+            (buffer >> (buffer_bits - 1 - buffer_counter)) & 0x00000001U;
         encoding |= current_bit;
         ++buffer_counter;
         ++encoding_length;
@@ -327,16 +322,15 @@ void decompress_file(std::string in_filename, std::string out_filename) {
       }
 
       // refreshes buffer if all bits have been read
-      if (buffer_counter >= 8) {
+      if (buffer_counter >= buffer_bits) {
         if ((instream.rdstate() & std::ifstream::eofbit) != 0) {
           buffer = 0;
         }
-        instream.read(reinterpret_cast<char *>(&buffer), 1);
+        instream.read(reinterpret_cast<char *>(&buffer), sizeof(buffer));
         buffer_counter = 0;
       }
     }
   }
-  outstream.close();
 }
 
 int main(int argc, char **argv) {
