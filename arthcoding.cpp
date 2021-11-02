@@ -161,7 +161,7 @@ void compress_file(std::string in_filename, std::string out_filename) {
         // one
         DEBUGF('b', "    pending bit detected");
         lower_bound <<= 1;
-        lower_bound &= 0x7FFFFFFEU;
+        lower_bound &= 0x7FFFFFFFU;
         upper_bound <<= 1;
         upper_bound |= 0x80000001U;
         ++pending;
@@ -233,6 +233,8 @@ void decompress_file(std::string in_filename, std::string out_filename) {
   uint32_t lower_bound = 0;
   uint32_t range = upper_bound - lower_bound;
   uint32_t encoding = 0;
+  uint32_t first_bit = 0x00000001U
+                       << (std::numeric_limits<uint32_t>::digits - 1);
   uint8_t buffer;
   uint8_t buffer_counter = 8;
   uint32_t characters_written = 0;
@@ -294,21 +296,35 @@ void decompress_file(std::string in_filename, std::string out_filename) {
       DEBUGF('z', "     upper is now " << upper_bound);
       DEBUGF('z', "     encoding is now " << encoding);
       DEBUGF('z', "     lower is now " << lower_bound);
-      if (lower_bound >= 0x80000000U || upper_bound < 0x80000000U) {
-        // dont need to do anything besides shift out high order bits
+      if ((upper_bound ^ lower_bound) < first_bit) {
+        // first bit matches
+        lower_bound <<= 1;
+        upper_bound <<= 1;
+        upper_bound |= 0x00000001U;
+        encoding <<= 1;
+        uint32_t current_bit = (buffer >> (7 - buffer_counter)) & 0x00000001U;
+        encoding |= current_bit;
+        ++buffer_counter;
+        ++encoding_length;
       } else if (lower_bound >= 0x40000000U && upper_bound < 0xC0000000U) {
-        // preserve highest order bits and discard 2nd highest order bits
-        // we also need to do this for the encoding itself
-        // (remove pending bits from encoding)
-        lower_bound &= 0xBFFFFFFFU;
-        upper_bound |= 0x40000000U;
-        encoding &= 0xBFFFFFFFU;
-        encoding |= ((encoding >> 1) & 0x40000000U);
+        // pending bits
+        lower_bound <<= 1;
+        lower_bound &= 0x7FFFFFFFU;
+        upper_bound <<= 1;
+        upper_bound |= 0x80000001U;
+        uint32_t encoding_msb =
+            encoding &
+            (0x00000001U << (std::numeric_limits<uint32_t>::digits - 1));
+        encoding <<= 1;
+        encoding |= encoding_msb;
+        uint32_t current_bit = (buffer >> (7 - buffer_counter)) & 0x00000001U;
+        encoding |= current_bit;
+        ++buffer_counter;
+        ++encoding_length;
       } else {
         DEBUGF('z', "     char took " << encoding_length << " bits to encode");
         break;
       }
-      ++encoding_length;
 
       // refreshes buffer if all bits have been read
       if (buffer_counter >= 8) {
@@ -318,14 +334,6 @@ void decompress_file(std::string in_filename, std::string out_filename) {
         instream.read(reinterpret_cast<char *>(&buffer), 1);
         buffer_counter = 0;
       }
-
-      uint32_t current_bit = (buffer >> (7 - buffer_counter)) & 0x00000001U;
-      encoding <<= 1;
-      encoding += current_bit;
-      ++buffer_counter;
-      lower_bound <<= 1;
-      upper_bound <<= 1;
-      ++upper_bound;
     }
   }
   outstream.close();
