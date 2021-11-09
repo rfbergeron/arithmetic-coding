@@ -1,8 +1,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
@@ -36,15 +36,14 @@ void scan_options(int argc, char **argv) {
 }
 
 void compress_file(std::string in_filename, std::string out_filename) {
-  std::filesystem::path in_path{in_filename};
-  std::ifstream instream(in_path);
+  std::ifstream instream(in_filename);
   if ((instream.rdstate() & std::ifstream::failbit) != 0) {
     std::cerr << "Failed to open file " << in_filename << std::endl;
     return;
   }
 
-  std::filesystem::path out_path{out_filename};
-  std::ofstream outstream(out_path, std::ofstream::binary | std::ofstream::out);
+  std::ofstream outstream(out_filename,
+                          std::ofstream::binary | std::ofstream::out);
   if ((outstream.rdstate() & std::ofstream::failbit) != 0) {
     std::cerr << "Failed to open file " << out_filename << std::endl;
     return;
@@ -57,10 +56,10 @@ void compress_file(std::string in_filename, std::string out_filename) {
     ++symbols[current].occurences;
   }
 
-  DEBUGF('y', "parsed all symbols");
-
   // builds symbol table and writes it to outfile as it constructs it
   uint32_t cumulative_lower_bound = 0;
+  std::cerr << std::showbase << std::hex << std::internal << std::setfill('0');
+  DEBUGF('t', "WRITING TABLE");
   for (auto &x : symbols) {
     x.second.lower = cumulative_lower_bound;
     x.second.upper = cumulative_lower_bound =
@@ -70,10 +69,10 @@ void compress_file(std::string in_filename, std::string out_filename) {
     outstream.write(reinterpret_cast<char const *>(&x.second.occurences),
                     sizeof(x.second.occurences));
 
-    DEBUGF('b', "symbol: " << std::showbase << std::hex << x.first
-                           << std::noshowbase << std::dec
-                           << " lower bound: " << x.second.lower
-                           << " upper bound: " << x.second.upper);
+    DEBUGF('t', "    SYMBOL: " << std::setw(4) << (x.first & 0xFFU)
+                               << "; UNADJUSTED BOUNDS: [" << std::setw(10)
+                               << x.second.lower << ", " << std::setw(10)
+                               << x.second.upper << ")");
   }
 
   // writes a NUL character entry with 0 occurences to denote that
@@ -84,18 +83,16 @@ void compress_file(std::string in_filename, std::string out_filename) {
 
   uint32_t upper_bound = std::numeric_limits<uint32_t>::max();
   uint32_t lower_bound = 0;
-  uint32_t pending = 0;
+  int pending = 0, buffer_counter = 0, max_bit_count = 0;
   uint32_t buffer = 0;
-  int buffer_counter = 0;
   const int buffer_bits = std::numeric_limits<uint32_t>::digits;
-  uint32_t first_bit = 0x00000001U << (buffer_bits - 1);
+  uint32_t first_bit = static_cast<uint32_t>(0x1U) << (buffer_bits - 1);
+  uint32_t second_bit = first_bit >> 1;
 
-  uint32_t in_size = std::filesystem::file_size(in_path);
-  DEBUGF('y', "STL says the file is " << in_size << " bytes long");
+  uint32_t in_size = cumulative_lower_bound;
   instream.clear();
   instream.seekg(0, instream.beg);
 
-  std::cerr << std::showbase << std::hex << std::internal << std::setfill('0');
   while (instream.get(current)) {
     // generate the range and bounds for selected symbol at this depth in the
     // file
@@ -103,16 +100,18 @@ void compress_file(std::string in_filename, std::string out_filename) {
     upper_bound = lower_bound + (range / in_size * symbols[current].upper);
     lower_bound += range / in_size * symbols[current].lower;
 
-    DEBUGF('z', "range for symbol " << std::setw(4) << static_cast<int>(current)
-                                    << ": " << lower_bound << " to "
-                                    << upper_bound);
+    DEBUGF('z', "NEXT SYMBOL: " << std::setw(4) << (current & 0xFFU)
+                                << "; RANGE: [" << std::setw(10) << lower_bound
+                                << ", " << std::setw(10) << upper_bound << ")");
 
+    uint32_t debug_buffer = 0;
+    int bit_count = 0;
     for (;;) {
       if ((upper_bound ^ lower_bound) < first_bit) {
         // first bit matches
         if (buffer_counter >= buffer_bits) {
-          DEBUGF('b', "        buffer full; writing " << std::setw(10) << buffer
-                                                      << " to file");
+          DEBUGF('b',
+                 "        BUFFER FULL; FLUSHING: " << std::setw(10) << buffer);
           outstream.write(reinterpret_cast<char *>(&buffer), sizeof(buffer));
           buffer = buffer_counter = 0;
         }
@@ -121,11 +120,12 @@ void compress_file(std::string in_filename, std::string out_filename) {
         uint32_t msb = lower_bound >> (buffer_bits - 1);
         buffer <<= 1;
         buffer |= msb;
+        debug_buffer <<= 1;
+        debug_buffer |= msb;
         ++buffer_counter;
 
-        DEBUGF('x', "    appending " << std::noshowbase << msb << std::showbase
-                                     << "; buffer is now " << std::setw(10)
-                                     << buffer);
+        DEBUGF('x', "    MOST SIGNIFICANT BIT: " << std::noshowbase << msb
+                                                 << std::showbase);
 
         // renormalize the ranges
         upper_bound <<= 1;
@@ -134,40 +134,56 @@ void compress_file(std::string in_filename, std::string out_filename) {
 
         // add pending bits to the buffer, writing to the output stream whenever
         // if gets full
-        uint32_t pending_bit = msb ^ 0x00000001U;
+        uint32_t pending_bit = msb ^ static_cast<uint32_t>(0x1U);
         if (pending > 0) {
-          DEBUGF('b', std::noshowbase << std::dec << std::setfill(' ')
-                                      << "    flushing " << std::setw(2)
-                                      << pending << " pending bits with value "
+          DEBUGF('p', std::noshowbase << std::dec << std::setfill(' ')
+                                      << "    FLUSHING " << std::setw(2)
+                                      << pending << " PENDING BITS WITH VALUE "
                                       << pending_bit << std::showbase
                                       << std::hex << std::setfill('0'));
         }
+        ++bit_count;
         while (pending > 0) {
           if (buffer_counter >= buffer_bits) {
-            DEBUGF('b', "        buffer full; writing "
-                            << std::setw(10) << buffer << " to file");
+            DEBUGF('b', "        BUFFER FULL; FLUSHING: " << std::setw(10)
+                                                          << buffer);
             outstream.write(reinterpret_cast<char *>(&buffer), sizeof(buffer));
             buffer = buffer_counter = 0;
           }
           buffer <<= 1;
           buffer |= pending_bit;
+          debug_buffer <<= 1;
+          debug_buffer |= pending_bit;
           ++buffer_counter;
           --pending;
+          ++bit_count;
         }
-      } else if (lower_bound >= 0x40000000U && upper_bound < 0xC0000000U) {
+      } else if (lower_bound >= second_bit &&
+                 upper_bound < (first_bit | second_bit)) {
         // pending bits, indicated by the first bits of the upper and lower
         // bounds not matching and the second bits being the inverse of the
         // first bit preserve first bit since it is undecided and discard second
         // one
-        DEBUGF('b', "    pending bit detected");
+        DEBUGF('p', "    BIT PENDING");
         lower_bound <<= 1;
-        lower_bound &= 0x7FFFFFFFU;
+        lower_bound &= ~first_bit;
         upper_bound <<= 1;
-        upper_bound |= 0x80000001U;
+        upper_bound |= first_bit | static_cast<uint32_t>(0x1U);
         ++pending;
       } else {
-        DEBUGF('z',
-               "fully encoded " << std::setw(4) << static_cast<int>(current));
+        DEBUGF('z', "CURRENT ENCODING SEGMENT: "
+                        << std::setw(10)
+                        << (buffer << (buffer_bits - buffer_counter)));
+        DEBUGF('e', "ENCODING COMPLETED:"
+                        << std::endl
+                        << "    CHARACTER: " << std::setw(4)
+                        << (current & 0xFFU) << std::endl
+                        << "    ENCODING: " << std::setw(10)
+                        << (debug_buffer << (buffer_bits - bit_count))
+                        << std::endl
+                        << "    LENGTH: " << std::dec << bit_count << std::endl
+                        << "    PENDING: " << pending << std::hex);
+        max_bit_count = std::max(max_bit_count, bit_count);
         break;
       }
     }
@@ -176,33 +192,28 @@ void compress_file(std::string in_filename, std::string out_filename) {
   // fill out the buffer with the high order bits of the lower bound
   if (buffer_counter > 0) {
     int bits_needed = buffer_bits - buffer_counter;
-    DEBUGF('z', std::noshowbase << std::dec << "buffer needs " << bits_needed
-                                << " more bits" << std::showbase << std::hex);
+    DEBUGF('b', std::noshowbase << std::dec << "PADDING BUFFER WITH "
+                                << bits_needed << " BITS" << std::showbase
+                                << std::hex);
     buffer <<= bits_needed;
     buffer |= lower_bound >> buffer_counter;
-    DEBUGF('z', "final buffer: " << std::setw(10) << buffer);
+    DEBUGF('b', "FINAL BUFFER: " << std::setw(10) << buffer);
     outstream.write(reinterpret_cast<char *>(&buffer), sizeof(buffer));
   }
-
-  DEBUGF('z', "finished encoding");
 }
 
 void decompress_file(std::string in_filename, std::string out_filename) {
-  std::filesystem::path in_path{in_filename};
-  std::ifstream instream(in_path, std::ifstream::binary);
+  std::ifstream instream(in_filename, std::ifstream::binary);
   if ((instream.rdstate() & std::ifstream::failbit) != 0) {
     std::cerr << "Failed to open file " << in_filename << std::endl;
     return;
   }
 
-  std::filesystem::path out_path{out_filename};
-  std::ofstream outstream(out_path, std::ofstream::binary);
+  std::ofstream outstream(out_filename, std::ofstream::binary);
   if ((outstream.rdstate() & std::ofstream::failbit) != 0) {
     std::cerr << "Failed to open file " << out_filename << std::endl;
     return;
   }
-
-  DEBUGF('z', "reading table");
 
   std::map<char, symbol_range> symbols;
   uint32_t occurences;
@@ -210,114 +221,154 @@ void decompress_file(std::string in_filename, std::string out_filename) {
 
   // also serves as the total number of characters in the original file
   uint32_t cumulative_lower_bound = 0;
-
-  DEBUGF('y', std::hex << std::showbase);
+  std::cerr << std::hex << std::showbase << std::internal << std::setfill('0');
+  DEBUGF('t', "READING TABLE");
   while (instream.get(symbol)) {
     instream.read(reinterpret_cast<char *>(&occurences), 4);
 
     // table has ended
     if (occurences == 0) break;
 
-    DEBUGF('y', "character " << symbol << "occured " << occurences << " times");
+    DEBUGF('t', "    SYMBOL: " << std::setw(4) << (symbol & 0xFFU)
+                               << "; UNADJUSTED BOUNDS: [" << std::setw(10)
+                               << cumulative_lower_bound << ", "
+                               << std::setw(10)
+                               << cumulative_lower_bound + occurences << ")");
 
     symbols[symbol] = {occurences, cumulative_lower_bound + occurences,
                        cumulative_lower_bound};
     cumulative_lower_bound += occurences;
   }
 
-  DEBUGF('y', std::dec << std::noshowbase);
-  DEBUGF('y', "Total characters: " << cumulative_lower_bound);
+  DEBUGF('y', "Total characters: " << std::dec << cumulative_lower_bound
+                                   << std::hex);
 
   uint32_t upper_bound = std::numeric_limits<uint32_t>::max();
   uint32_t lower_bound = 0;
-  uint32_t range = upper_bound - lower_bound;
-  uint32_t encoding;
-  uint32_t buffer;
-  int buffer_counter = 0;
+  int pending = 0, buffer_counter = 0;
+  uint32_t buffer, encoding;
   int buffer_bits = std::numeric_limits<uint32_t>::digits;
-  uint32_t first_bit = 0x00000001U << buffer_bits;
+  uint32_t first_bit = static_cast<uint32_t>(0x1U) << (buffer_bits - 1);
+  uint32_t second_bit = first_bit >> 1;
   uint32_t characters_written = 0;
+  uint32_t in_size = cumulative_lower_bound;
 
   // fill encoding and buffer
   instream.read(reinterpret_cast<char *>(&encoding), sizeof(encoding));
   instream.read(reinterpret_cast<char *>(&buffer), sizeof(buffer));
-  DEBUGF('y', std::hex << std::showbase);
-
   for (;;) {
-    range = upper_bound - lower_bound;
-    DEBUGF('z', "available range: " << range);
-    DEBUGF('z', "encoding: " << encoding)
-    char c;
-    uint32_t encoding_length = 0;
+    uint32_t range = upper_bound - lower_bound;
+    char current;
+    int encoding_length = 0;
 
+    DEBUGF('c', "SCANNING FOR SYMBOLS THAT COULD HAVE BEEN ENCODED WITH "
+                    << std::setw(10) << encoding);
     for (auto &x : symbols) {
       // computes what the bounds would be given that x was encoded
       // and sees if the actual encoding falls within them
-      uint32_t upper_given_x =
-          lower_bound + (range / cumulative_lower_bound * x.second.upper);
-      uint32_t lower_given_x =
-          lower_bound + (range / cumulative_lower_bound * x.second.lower);
-
-      DEBUGF('z', "     range given that "
-                      << x.first << " occured: " << lower_given_x << " to "
-                      << upper_given_x);
+      uint32_t upper_given_x = lower_bound + (range / in_size * x.second.upper);
+      uint32_t lower_given_x = lower_bound + (range / in_size * x.second.lower);
 
       if (encoding < upper_given_x && encoding >= lower_given_x) {
-        c = x.first;
+        current = x.first;
         --x.second.occurences;
-        DEBUGF('x', "range " << upper_given_x << " to " << lower_given_x
-                             << " matches encoding " << encoding << "for char "
-                             << c);
-        break;
+        DEBUGF('c', "    CHARACTER " << std::setw(4) << (current & 0xFFU)
+                                     << " BOUNDS THE ENCODING");
       }
     }
 
-    outstream.write(&c, 1);
+    outstream.write(&current, 1);
     ++characters_written;
-    if (characters_written >= cumulative_lower_bound) return;
-    DEBUGF('z', characters_written << " out of " << cumulative_lower_bound
-                                   << " characters written");
+    if (characters_written >= in_size) return;
 
-    upper_bound =
-        lower_bound + (range / cumulative_lower_bound * symbols[c].upper);
-    lower_bound =
-        lower_bound + (range / cumulative_lower_bound * symbols[c].lower);
+    upper_bound = lower_bound + (range / in_size * symbols[current].upper);
+    lower_bound += range / in_size * symbols[current].lower;
+
+    DEBUGF('z', "NEXT SYMBOL: " << std::setw(4) << (current & 0xFFU)
+                                << "; RANGE: [" << std::setw(10) << lower_bound
+                                << ", " << std::setw(10) << upper_bound << ")");
+    DEBUGF('z', "CURRENT ENCODING SEGMENT: " << std::setw(10) << encoding);
 
     // loop should remove bits from the range that match or were pending bits,
     // since they dont tell us anything we dont already know
+    uint32_t debug_buffer = 0;
+    int bit_count = 0;
     for (;;) {
-      DEBUGF('z', "     upper is now " << upper_bound);
-      DEBUGF('z', "     encoding is now " << encoding);
-      DEBUGF('z', "     lower is now " << lower_bound);
       if ((upper_bound ^ lower_bound) < first_bit) {
         // first bit matches
+        uint32_t msb = lower_bound >> (buffer_bits - 1);
+        debug_buffer <<= 1;
+        debug_buffer |= msb;
+        lower_bound <<= 1;
+        upper_bound <<= 1;
+        upper_bound |= static_cast<uint32_t>(0x1U);
+        encoding <<= 1;
+        uint32_t current_bit = (buffer & first_bit) >> (buffer_bits - 1);
+        buffer <<= 1;
+        encoding |= current_bit;
+        ++buffer_counter;
+        ++encoding_length;
+        ++bit_count;
+        while (pending > 0) {
+          // encoding <<= 1;
+          // uint32_t current_bit = (buffer & 0x80000000U) >> 31;
+          // buffer <<= 1;
+          // encoding |= current_bit;
+          // refreshes buffer if all bits have been read
+          /*
+          if (buffer_counter >= 32) {
+              if ((instream.rdstate() & std::ifstream::eofbit) != 0) {
+              buffer = 0;
+              }
+              instream.read(reinterpret_cast<char *>(&buffer), sizeof(buffer));
+              buffer_counter = 0;
+          }
+          */
+          debug_buffer <<= 1;
+          debug_buffer |= ~msb;
+          --pending;
+          ++bit_count;
+        }
+      } else if (lower_bound >= second_bit &&
+                 upper_bound < (first_bit | second_bit)) {
+        // pending bits
+        DEBUGF('p', "    BIT PENDING");
+        lower_bound <<= 1;
+        lower_bound &= ~first_bit;
+        upper_bound <<= 1;
+        upper_bound |= first_bit | static_cast<uint32_t>(0x1U);
+        ++pending;
+        /*
+        uint32_t encoding_msb = encoding & 0x80000000U;
+        encoding <<= 1;
+        encoding |= encoding_msb;
+        uint32_t current_bit = (buffer & 0x80000000U) >> 31;
+        buffer <<= 1;
+        encoding |= current_bit;
+        ++buffer_counter;
+        lower_bound &= 0xBFFFFFFFU;
+        upper_bound |= 0x40000000U;
+        encoding &= 0xBFFFFFFFU;
+        encoding |= ((encoding >> 1) & 0x40000000U);
+        ++buffer_counter;
         lower_bound <<= 1;
         upper_bound <<= 1;
         upper_bound |= 0x00000001U;
-        encoding <<= 1;
-        uint32_t current_bit =
-            (buffer >> (buffer_bits - 1 - buffer_counter)) & 0x00000001U;
+        uint32_t current_bit = (buffer & 0x80000000U) >> 31;
+        buffer <<= 1;
         encoding |= current_bit;
-        ++buffer_counter;
-        ++encoding_length;
-      } else if (lower_bound >= 0x40000000U && upper_bound < 0xC0000000U) {
-        // pending bits
-        lower_bound <<= 1;
-        lower_bound &= 0x7FFFFFFFU;
-        upper_bound <<= 1;
-        upper_bound |= 0x80000001U;
-        uint32_t encoding_msb =
-            encoding &
-            (0x00000001U << (std::numeric_limits<uint32_t>::digits - 1));
-        encoding <<= 1;
-        encoding |= encoding_msb;
-        uint32_t current_bit =
-            (buffer >> (buffer_bits - 1 - buffer_counter)) & 0x00000001U;
-        encoding |= current_bit;
-        ++buffer_counter;
+        */
         ++encoding_length;
       } else {
-        DEBUGF('z', "     char took " << encoding_length << " bits to encode");
+        DEBUGF('e', "DECODING COMPLETED:"
+                        << std::endl
+                        << "    CHARACTER: " << std::setw(4)
+                        << (current & 0xFFU) << std::endl
+                        << "    ENCODING: " << std::setw(10)
+                        << (debug_buffer << (buffer_bits - bit_count))
+                        << std::endl
+                        << "    LENGTH: " << std::dec << bit_count << std::endl
+                        << "    PENDING: " << pending << std::hex);
         break;
       }
 

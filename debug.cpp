@@ -6,7 +6,6 @@
 debugflags::flagset debugflags::flags{};
 
 void debugflags::setflags(const std::string& initflags) {
-  std::cerr << "setting flag " << initflags << std::endl;
   for (const unsigned char flag : initflags) {
     if (flag == '@')
       flags.set();

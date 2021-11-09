@@ -1,6 +1,6 @@
 GPPWARN     = -Wall -Wextra -Werror -Wpedantic -Wshadow -Wold-style-cast
 GPPOPTS     = ${GPPWARN}
-COMPILECPP  = g++ -std=c++17
+COMPILECPP  = g++ -ggdb -std=c++17
 MAKEDEPCPP  = g++ -std=c++17 -MM ${GPPOPTS}
 
 MODULES     = debug
@@ -16,7 +16,10 @@ CLEANOBJS   = ${OBJLIBS} ${EXECBIN}
 all: ${EXECBIN}
 
 ${EXECBIN} : ${OBJECTS}
-		${COMPILECPP} -o $@ ${OBJECTS}
+	${COMPILECPP} -o $@ ${OBJECTS}
+
+gdb : ${OBJECTS}
+	${COMPILECPP} -DNDEBUG -o ${EXECBIN} ${OBJECTS}
 
 %.o: %.cpp
 	${COMPILECPP} -c $<
