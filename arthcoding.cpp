@@ -83,13 +83,16 @@ void compress_file(std::string in_filename, std::string out_filename) {
 
   uint32_t upper_bound = std::numeric_limits<uint32_t>::max();
   uint32_t lower_bound = 0;
-  int pending = 0, buffer_counter = 0, max_bit_count = 0;
+  int pending_count = 0, buffer_count = 0;
   uint32_t buffer = 0;
   const int buffer_bits = std::numeric_limits<uint32_t>::digits;
+  uint32_t in_size = cumulative_lower_bound;
   uint32_t first_bit = static_cast<uint32_t>(0x1U) << (buffer_bits - 1);
   uint32_t second_bit = first_bit >> 1;
 
-  uint32_t in_size = cumulative_lower_bound;
+  // debugging variables
+  int max_bit_count = 0;
+
   instream.clear();
   instream.seekg(0, instream.beg);
 
@@ -104,25 +107,27 @@ void compress_file(std::string in_filename, std::string out_filename) {
                                 << "; RANGE: [" << std::setw(10) << lower_bound
                                 << ", " << std::setw(10) << upper_bound << ")");
 
+    // debugging variables
     uint32_t debug_buffer = 0;
     int bit_count = 0;
+
     for (;;) {
       if ((upper_bound ^ lower_bound) < first_bit) {
         // first bit matches
-        if (buffer_counter >= buffer_bits) {
+        if (buffer_count >= buffer_bits) {
           DEBUGF('b',
                  "        BUFFER FULL; FLUSHING: " << std::setw(10) << buffer);
           outstream.write(reinterpret_cast<char *>(&buffer), sizeof(buffer));
-          buffer = buffer_counter = 0;
+          buffer = buffer_count = 0;
         }
 
         // write msb to the end of the buffer
         uint32_t msb = lower_bound >> (buffer_bits - 1);
         buffer <<= 1;
         buffer |= msb;
-        debug_buffer <<= 1;
-        debug_buffer |= msb;
-        ++buffer_counter;
+        STUB(debug_buffer <<= 1);
+        STUB(debug_buffer |= msb);
+        ++buffer_count;
 
         DEBUGF('x', "    MOST SIGNIFICANT BIT: " << std::noshowbase << msb
                                                  << std::showbase);
@@ -135,28 +140,25 @@ void compress_file(std::string in_filename, std::string out_filename) {
         // add pending bits to the buffer, writing to the output stream whenever
         // if gets full
         uint32_t pending_bit = msb ^ static_cast<uint32_t>(0x1U);
-        if (pending > 0) {
-          DEBUGF('p', std::noshowbase << std::dec << std::setfill(' ')
-                                      << "    FLUSHING " << std::setw(2)
-                                      << pending << " PENDING BITS WITH VALUE "
-                                      << pending_bit << std::showbase
-                                      << std::hex << std::setfill('0'));
-        }
-        ++bit_count;
-        while (pending > 0) {
-          if (buffer_counter >= buffer_bits) {
+        STUB(if (pending_count > 0) {
+          DEBUGF('p', std::noshowbase
+                          << std::dec << std::setfill(' ') << "    FLUSHING "
+                          << std::setw(2) << pending_count
+                          << " PENDING BITS WITH VALUE " << pending_bit
+                          << std::showbase << std::hex << std::setfill('0'));
+        } ++bit_count;);
+        while (pending_count > 0) {
+          if (buffer_count >= buffer_bits) {
             DEBUGF('b', "        BUFFER FULL; FLUSHING: " << std::setw(10)
                                                           << buffer);
             outstream.write(reinterpret_cast<char *>(&buffer), sizeof(buffer));
-            buffer = buffer_counter = 0;
+            buffer = buffer_count = 0;
           }
           buffer <<= 1;
           buffer |= pending_bit;
-          debug_buffer <<= 1;
-          debug_buffer |= pending_bit;
-          ++buffer_counter;
-          --pending;
-          ++bit_count;
+          ++buffer_count;
+          --pending_count;
+          STUB(++bit_count; debug_buffer <<= 1; debug_buffer |= pending_bit;);
         }
       } else if (lower_bound >= second_bit &&
                  upper_bound < (first_bit | second_bit)) {
@@ -169,11 +171,11 @@ void compress_file(std::string in_filename, std::string out_filename) {
         lower_bound &= ~first_bit;
         upper_bound <<= 1;
         upper_bound |= first_bit | static_cast<uint32_t>(0x1U);
-        ++pending;
+        ++pending_count;
       } else {
-        DEBUGF('z', "CURRENT ENCODING SEGMENT: "
-                        << std::setw(10)
-                        << (buffer << (buffer_bits - buffer_counter)));
+        DEBUGF('z', "BITS DISCARDED: " << std::dec << std::setw(2) << bit_count
+                                       << std::hex << "; VALUE: "
+                                       << std::setw(10) << debug_buffer);
         DEBUGF('e', "ENCODING COMPLETED:"
                         << std::endl
                         << "    CHARACTER: " << std::setw(4)
@@ -182,21 +184,21 @@ void compress_file(std::string in_filename, std::string out_filename) {
                         << (debug_buffer << (buffer_bits - bit_count))
                         << std::endl
                         << "    LENGTH: " << std::dec << bit_count << std::endl
-                        << "    PENDING: " << pending << std::hex);
-        max_bit_count = std::max(max_bit_count, bit_count);
+                        << "    PENDING: " << pending_count << std::hex);
+        STUB(max_bit_count = std::max(max_bit_count, bit_count));
         break;
       }
     }
   }
 
   // fill out the buffer with the high order bits of the lower bound
-  if (buffer_counter > 0) {
-    int bits_needed = buffer_bits - buffer_counter;
+  if (buffer_count > 0) {
+    int bits_needed = buffer_bits - buffer_count;
     DEBUGF('b', std::noshowbase << std::dec << "PADDING BUFFER WITH "
                                 << bits_needed << " BITS" << std::showbase
                                 << std::hex);
     buffer <<= bits_needed;
-    buffer |= lower_bound >> buffer_counter;
+    buffer |= lower_bound >> buffer_count;
     DEBUGF('b', "FINAL BUFFER: " << std::setw(10) << buffer);
     outstream.write(reinterpret_cast<char *>(&buffer), sizeof(buffer));
   }
@@ -245,7 +247,7 @@ void decompress_file(std::string in_filename, std::string out_filename) {
 
   uint32_t upper_bound = std::numeric_limits<uint32_t>::max();
   uint32_t lower_bound = 0;
-  int pending = 0, buffer_counter = 0;
+  int pending_count = 0, buffer_count = 0;
   uint32_t buffer, encoding;
   int buffer_bits = std::numeric_limits<uint32_t>::digits;
   uint32_t first_bit = static_cast<uint32_t>(0x1U) << (buffer_bits - 1);
@@ -259,7 +261,6 @@ void decompress_file(std::string in_filename, std::string out_filename) {
   for (;;) {
     uint32_t range = upper_bound - lower_bound;
     char current;
-    int encoding_length = 0;
 
     DEBUGF('c', "SCANNING FOR SYMBOLS THAT COULD HAVE BEEN ENCODED WITH "
                     << std::setw(10) << encoding);
@@ -287,18 +288,15 @@ void decompress_file(std::string in_filename, std::string out_filename) {
     DEBUGF('z', "NEXT SYMBOL: " << std::setw(4) << (current & 0xFFU)
                                 << "; RANGE: [" << std::setw(10) << lower_bound
                                 << ", " << std::setw(10) << upper_bound << ")");
-    DEBUGF('z', "CURRENT ENCODING SEGMENT: " << std::setw(10) << encoding);
 
-    // loop should remove bits from the range that match or were pending bits,
-    // since they dont tell us anything we dont already know
+    // debug variables
     uint32_t debug_buffer = 0;
     int bit_count = 0;
+    // remove matching or pending bits
     for (;;) {
       if ((upper_bound ^ lower_bound) < first_bit) {
         // first bit matches
         uint32_t msb = lower_bound >> (buffer_bits - 1);
-        debug_buffer <<= 1;
-        debug_buffer |= msb;
         lower_bound <<= 1;
         upper_bound <<= 1;
         upper_bound |= static_cast<uint32_t>(0x1U);
@@ -306,29 +304,14 @@ void decompress_file(std::string in_filename, std::string out_filename) {
         uint32_t current_bit = (buffer & first_bit) >> (buffer_bits - 1);
         buffer <<= 1;
         encoding |= current_bit;
-        ++buffer_counter;
-        ++encoding_length;
-        ++bit_count;
-        while (pending > 0) {
-          // encoding <<= 1;
-          // uint32_t current_bit = (buffer & 0x80000000U) >> 31;
-          // buffer <<= 1;
-          // encoding |= current_bit;
-          // refreshes buffer if all bits have been read
-          /*
-          if (buffer_counter >= 32) {
-              if ((instream.rdstate() & std::ifstream::eofbit) != 0) {
-              buffer = 0;
-              }
-              instream.read(reinterpret_cast<char *>(&buffer), sizeof(buffer));
-              buffer_counter = 0;
-          }
-          */
-          debug_buffer <<= 1;
-          debug_buffer |= ~msb;
-          --pending;
-          ++bit_count;
-        }
+        ++buffer_count;
+        STUB(++bit_count; debug_buffer <<= 1; debug_buffer |= msb;
+             while (pending_count > 0) {
+               debug_buffer <<= 1;
+               debug_buffer |= msb ^ static_cast<uint32_t>(0x1U);
+               --pending_count;
+               ++bit_count;
+             });
       } else if (lower_bound >= second_bit &&
                  upper_bound < (first_bit | second_bit)) {
         // pending bits
@@ -337,29 +320,19 @@ void decompress_file(std::string in_filename, std::string out_filename) {
         lower_bound &= ~first_bit;
         upper_bound <<= 1;
         upper_bound |= first_bit | static_cast<uint32_t>(0x1U);
-        ++pending;
-        /*
-        uint32_t encoding_msb = encoding & 0x80000000U;
+        uint32_t encoding_msb = encoding & first_bit;
         encoding <<= 1;
+        encoding &= ~first_bit;
         encoding |= encoding_msb;
-        uint32_t current_bit = (buffer & 0x80000000U) >> 31;
+        uint32_t current_bit = (buffer & first_bit) >> (buffer_bits - 1);
         buffer <<= 1;
         encoding |= current_bit;
-        ++buffer_counter;
-        lower_bound &= 0xBFFFFFFFU;
-        upper_bound |= 0x40000000U;
-        encoding &= 0xBFFFFFFFU;
-        encoding |= ((encoding >> 1) & 0x40000000U);
-        ++buffer_counter;
-        lower_bound <<= 1;
-        upper_bound <<= 1;
-        upper_bound |= 0x00000001U;
-        uint32_t current_bit = (buffer & 0x80000000U) >> 31;
-        buffer <<= 1;
-        encoding |= current_bit;
-        */
-        ++encoding_length;
+        ++buffer_count;
+        STUB(++pending_count);
       } else {
+        DEBUGF('z', "BITS DISCARDED: " << std::dec << std::setw(2) << bit_count
+                                       << std::hex << "; VALUE: "
+                                       << std::setw(10) << debug_buffer);
         DEBUGF('e', "DECODING COMPLETED:"
                         << std::endl
                         << "    CHARACTER: " << std::setw(4)
@@ -368,17 +341,17 @@ void decompress_file(std::string in_filename, std::string out_filename) {
                         << (debug_buffer << (buffer_bits - bit_count))
                         << std::endl
                         << "    LENGTH: " << std::dec << bit_count << std::endl
-                        << "    PENDING: " << pending << std::hex);
+                        << "    PENDING: " << pending_count << std::hex);
         break;
       }
 
       // refreshes buffer if all bits have been read
-      if (buffer_counter >= buffer_bits) {
+      if (buffer_count >= buffer_bits) {
         if ((instream.rdstate() & std::ifstream::eofbit) != 0) {
           buffer = 0;
         }
         instream.read(reinterpret_cast<char *>(&buffer), sizeof(buffer));
-        buffer_counter = 0;
+        buffer_count = 0;
       }
     }
   }

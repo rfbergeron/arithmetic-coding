@@ -37,6 +37,7 @@ class debugflags {
 #ifdef NDEBUG
 #define DEBUGF(FLAG, CODE) ;
 #define DEBUGS(FLAG, STMT) ;
+#define STUB(STMT) ;
 #else
 #define DEBUGF(FLAG, CODE)            \
   {                                   \
@@ -50,6 +51,8 @@ class debugflags {
       STMT;                          \
     }                                \
   }
+#define STUB(STMT) \
+  { STMT; }
 #endif
 
 #endif
