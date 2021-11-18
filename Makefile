@@ -3,14 +3,15 @@ GPPOPTS     = ${GPPWARN}
 COMPILECPP  = g++ -ggdb -std=c++17
 MAKEDEPCPP  = g++ -std=c++17 -MM ${GPPOPTS}
 
-MODULES     = debug
 EXECBIN     = arcode
 ALLMODS     = ${MODULES} ${EXECBIN}
 SOURCELIST  = ${foreach MOD, ${ALLMODS}, ${MOD}.h ${MOD}.tcc ${MOD}.cpp}
 ALLSOURCE   = ${wildcard ${SOURCELIST}} ${MKFILE}
 CPPSOURCE   = ${wildcard ${MODULES:=.cpp}}
-OBJECTS     = arthcoding.cpp debug.h debug.cpp
-EXECOBJS    = arthcoding.o ${OBJLIBS}
+SOURCES     = main.cpp debug.cpp
+HEADERS     = debug.h arthcoder.h
+TEMPLATES   = arthcoder.tcc
+OBJECTS     = main.o debug.o
 CLEANOBJS   = ${OBJLIBS} ${EXECBIN}
 
 all: ${EXECBIN}
@@ -21,17 +22,17 @@ ${EXECBIN} : ${OBJECTS}
 gdb : ${OBJECTS}
 	${COMPILECPP} -DNDEBUG -o ${EXECBIN} ${OBJECTS}
 
-%.o: %.cpp
-	${COMPILECPP} -c $<
+%.o: %.cpp ${HEADERS}
+	${COMPILECPP} -c $< ${HEADERS}
 
 clean:
-	- rm ${CLEANOBJS}
+	- rm ${OBJECTS} ${EXECBIN}
 	${GMAKE} rmtest
 
 rmtest:
 	- ./cleardata.sh
 
-again: ${ALLSOURCE}
+again: ${SOURCES} ${HEADERS}
 	${GMAKE} clean all
 
 test:
@@ -41,4 +42,4 @@ test:
 	- ./arcode decode 0p3r4t0r.yeet 0p3r4t0r.decode
 
 format:
-	- clang-format -i --style=Google ${OBJECTS}
+	- clang-format -i --style=Google ${SOURCES} ${HEADERS}

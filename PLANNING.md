@@ -36,34 +36,43 @@ This means that the unadjusted ranges for each character cannot be pulled from
 a map each time. They must be recalculated each time a character is encoded or
 decoded.
 
+# Understanding stream iterators
+Stream iterators require a single template argument `T`, which is the type that
+the contents of the stream will be converted to (for `istreams`) or from (for
+`ostreams`). So, dereferencing an `istream_iterator` will perform the conversion
+`charT -> T` for as many valid characters as possible, and dereferencing and
+assigning to an `istream_iterator` will convert an object of type `T` to a
+character sequence and write the sequence to the stream.
+
+# Working with more than just files
+TODO
+
 # Better function signatures
-I'm going to attempt to ape the standard library and the way it declares its
-functions.
+Unlike STL functions, which largely use iterators for function parameters, it
+would make more sense to use streams here, since we are primarily concerned with
+reading and writing text and binary files. The flexibility we would be concerned
+with would be working with streams that have different `charT` types. However,
+since we are working with binary data, the compressed stream should only have
+a `charT` of type `char`.
 
-The compress function will take its input from a `std::istream`. Its output will
-be stored using an iterator. The underlying type of the iterator will be
-extracted from it and the buffer will be converted appropriately.
+The compress and decompress functions would then be templated on the `charT`
+type of the plaintext, and the type of unsigned integer to be used as a buffer.
 
-The decompress function will take its input from an iterator. Two arguments will
-be provided, corresponding to the first and last element of the data structure
-that the data will be taken from. The underlying type of the iterator will be
-extracted from it and converted to the type of the buffer appropriately. It will
-write its output to a `std::ostream`.
+If the user wishes to compress arbitary types (custom data structures), the user
+would first need to convert it to a binary or text format that can be streamed.
+This is surprisingly not that difficult: you can cast anything to `char*`,
+construct a string using this value, and then construct a `streamstream` using
+the string. This works, but causes many extraneous copies. Alternatively, some
+implementations allow you to set the buffer of a `stringstream` directly, so
+all you'd have to do is create a `stringstream`, cast the value to `char*`, and
+set the stream's buffer to this value.
 
-```
-template <class OutputIterator,
-          class U = typename std::iterator_traits<OutputIterator>::value_type>
-void compress_stream (std::istream &is, OutputIterator out);
-template <class InputIterator,
-          class U = typename std::iterator_traits<InputIterator>::value_type>
-void decompress_data (InputIterator first, InputIterator last, std::ostream &os);
-```
-
-Alternatively, iterators could be used in place of streams. Streams could still
-be supplied to the function through stream iterators. However, I've read on
-stackoverflow that this presents its own host of issues.
-
-# A very generic approach
-A single interface could be used for both adaptive and non-adaptive models.
-This would be accomplished by allowing the user to provide functions for
-determining the ranges of character occurence and to update the frequency table.
+# Bit representations of different widths on systems with different endianness
+## Big endian
+16 bit: `0x1100`
+32 bit: `0x33221100`
+64 bit: `0x7766554433221100`
+## Little endian
+16 bit: `0x0011`
+32 bit: `0x00112233`
+64 bit: `0x0011223344556677`

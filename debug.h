@@ -52,7 +52,7 @@ class debugflags {
     }                                \
   }
 #define STUB(STMT) \
-  { STMT; }
+  STMT;
 #endif
 
 #endif
