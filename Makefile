@@ -22,7 +22,7 @@ ${EXECBIN} : ${OBJECTS}
 gdb : ${OBJECTS}
 	${COMPILECPP} -DNDEBUG -o ${EXECBIN} ${OBJECTS}
 
-%.o: %.cpp ${HEADERS}
+%.o: %.cpp ${HEADERS} ${TEMPLATES}
 	${COMPILECPP} -c $< ${HEADERS}
 
 clean:
@@ -32,7 +32,7 @@ clean:
 rmtest:
 	- ./cleardata.sh
 
-again: ${SOURCES} ${HEADERS}
+again: ${SOURCES} ${HEADERS} ${TEMPLATES}
 	${GMAKE} clean all
 
 test:
@@ -42,4 +42,4 @@ test:
 	- ./arcode decode 0p3r4t0r.yeet 0p3r4t0r.decode
 
 format:
-	- clang-format -i --style=Google ${SOURCES} ${HEADERS}
+	- clang-format -i --style=Google ${SOURCES} ${HEADERS} ${TEMPLATES}

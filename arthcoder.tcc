@@ -1,15 +1,16 @@
-#include <iostream>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <iterator>
-#include <map>
 #include <limits>
+#include <map>
 #include <numeric>
-#include "debug.h"
+
 #include "arthcoder.h"
+#include "debug.h"
 
 template <class TBuffer, class charT>
-void compress_stream (std::basic_istream<charT> &is, std::ostream &os) {
+void compress_stream(std::basic_istream<charT> &is, std::ostream &os) {
   std::map<charT, symbol_range<TBuffer>> symbols;
 
   charT current;
@@ -26,9 +27,10 @@ void compress_stream (std::basic_istream<charT> &is, std::ostream &os) {
     x.second.upper = cumulative_lower_bound =
         x.second.lower + x.second.occurrences;
 
-    const char *casted_charT = reinterpret_cast<const char*>(&x.first);
+    const char *casted_charT = reinterpret_cast<const char *>(&x.first);
     os.write(casted_charT, sizeof(x.first));
-    const char *casted_TBuffer = reinterpret_cast<const char*>(&x.second.occurrences);
+    const char *casted_TBuffer =
+        reinterpret_cast<const char *>(&x.second.occurrences);
     os.write(casted_TBuffer, sizeof(x.second.occurrences));
     DEBUGF('t', "    SYMBOL: " << std::setw(4) << (x.first & 0xFFU)
                                << "; UNADJUSTED BOUNDS: [" << std::setw(10)
@@ -39,7 +41,7 @@ void compress_stream (std::basic_istream<charT> &is, std::ostream &os) {
   // writes a NUL character entry with 0 occurrences to denote that
   // the table has ended
   const TBuffer ZERO = 0;
-  const char *CASTED_ZERO = reinterpret_cast<const char*>(&ZERO);
+  const char *CASTED_ZERO = reinterpret_cast<const char *>(&ZERO);
   os.write(CASTED_ZERO, 1);
   os.write(CASTED_ZERO, sizeof(ZERO));
 
@@ -77,7 +79,7 @@ void compress_stream (std::basic_istream<charT> &is, std::ostream &os) {
         if (buffer_count >= buffer_bits) {
           DEBUGF('b',
                  "        BUFFER FULL; FLUSHING: " << std::setw(10) << buffer);
-          const char *casted_buffer = reinterpret_cast<const char*>(&buffer);
+          const char *casted_buffer = reinterpret_cast<const char *>(&buffer);
           os.write(casted_buffer, sizeof(buffer));
           buffer = buffer_count = 0;
         }
@@ -112,7 +114,7 @@ void compress_stream (std::basic_istream<charT> &is, std::ostream &os) {
           if (buffer_count >= buffer_bits) {
             DEBUGF('b', "        BUFFER FULL; FLUSHING: " << std::setw(10)
                                                           << buffer);
-            const char *casted_buffer = reinterpret_cast<const char*>(&buffer);
+            const char *casted_buffer = reinterpret_cast<const char *>(&buffer);
             os.write(casted_buffer, sizeof(buffer));
             buffer = buffer_count = 0;
           }
@@ -153,7 +155,8 @@ void compress_stream (std::basic_istream<charT> &is, std::ostream &os) {
     }
   }
 
-  // fill out the buffer with the high order bits of the lower bound
+  // fill out the buffer with the high order bits of the lower bound, then write
+  // the rest of the bits of the lower bound shifted as far left as possible
   if (buffer_count > 0) {
     int bits_needed = buffer_bits - buffer_count;
     DEBUGF('b', std::noshowbase << std::dec << "PADDING BUFFER WITH "
@@ -161,9 +164,14 @@ void compress_stream (std::basic_istream<charT> &is, std::ostream &os) {
                                 << std::hex);
     buffer <<= bits_needed;
     buffer |= lower_bound >> buffer_count;
+    lower_bound <<= bits_needed;
     DEBUGF('b', "FINAL BUFFER: " << std::setw(10) << buffer);
-    const char *casted_buffer = reinterpret_cast<const char*>(&buffer);
+    DEBUGF('b', "FINAL LOWER BOUND: " << std::setw(10) << lower_bound);
+    const char *casted_buffer = reinterpret_cast<const char *>(&buffer);
     os.write(casted_buffer, sizeof(buffer));
+    const char *casted_lower_bound =
+        reinterpret_cast<const char *>(&lower_bound);
+    os.write(casted_lower_bound, sizeof(lower_bound));
   }
 }
 
@@ -177,7 +185,7 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os) {
   TBuffer cumulative_lower_bound = 0;
   std::cerr << std::hex << std::showbase << std::internal << std::setfill('0');
   DEBUGF('t', "READING TABLE");
-  while (is.read(reinterpret_cast<char*>(&symbol), sizeof(symbol))) {
+  while (is.read(reinterpret_cast<char *>(&symbol), sizeof(symbol))) {
     is.read(reinterpret_cast<char *>(&occurrences), sizeof(TBuffer));
 
     // table has ended
