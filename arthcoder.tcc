@@ -5,12 +5,14 @@
 #include <limits>
 #include <map>
 #include <numeric>
+#include <string>
 
 #include "arthcoder.h"
 #include "debug.h"
 
 template <class TBuffer, class charT>
-void compress_stream(std::basic_istream<charT> &is, std::ostream &os) {
+std::map<charT, symbol_range<TBuffer>> build_table(
+    std::basic_istream<charT> &is) {
   std::map<charT, symbol_range<TBuffer>> symbols;
 
   charT current;
@@ -18,52 +20,69 @@ void compress_stream(std::basic_istream<charT> &is, std::ostream &os) {
     ++symbols[current].occurrences;
   }
 
-  // builds symbol table and writes it to outfile as it constructs it
   TBuffer cumulative_lower_bound = 0;
-  std::cerr << std::showbase << std::hex << std::internal << std::setfill('0');
-  DEBUGF('t', "WRITING TABLE");
   for (auto &x : symbols) {
     x.second.lower = cumulative_lower_bound;
     x.second.upper = cumulative_lower_bound =
         x.second.lower + x.second.occurrences;
+  }
 
-    const char *casted_charT = reinterpret_cast<const char *>(&x.first);
-    os.write(casted_charT, sizeof(x.first));
-    const char *casted_TBuffer =
-        reinterpret_cast<const char *>(&x.second.occurrences);
-    os.write(casted_TBuffer, sizeof(x.second.occurrences));
+  DEBUGF('t', "PLAINTEXT LENGTH: " << symbols.rbegin()->second.upper);
+  return symbols;
+}
+
+template <class TBuffer, class charT>
+void write_table(std::ostream &os,
+                 const std::map<charT, symbol_range<TBuffer>> &symbols) {
+  std::cerr << std::showbase << std::hex << std::internal << std::setfill('0');
+  DEBUGF('t', "WRITING TABLE");
+  // write magic number to stream
+  std::string magic{0x1B, 't', 'a', 'b',
+                    static_cast<char>(std::numeric_limits<TBuffer>::digits)};
+  os.write(magic.data(), 5);
+
+  for (const auto &x : symbols) {
+    os.write(reinterpret_cast<const char *>(&x.first), sizeof(x.first));
+    os.write(reinterpret_cast<const char *>(&x.second.occurrences),
+             sizeof(x.second.occurrences));
     DEBUGF('t', "    SYMBOL: " << std::setw(4) << (x.first & 0xFFU)
                                << "; UNADJUSTED BOUNDS: [" << std::setw(10)
                                << x.second.lower << ", " << std::setw(10)
                                << x.second.upper << ")");
   }
 
-  // writes a NUL character entry with 0 occurrences to denote that
+  // writes a NUL character entry with 0 occurrences to indicate that
   // the table has ended
-  const TBuffer ZERO = 0;
-  const char *CASTED_ZERO = reinterpret_cast<const char *>(&ZERO);
-  os.write(CASTED_ZERO, 1);
-  os.write(CASTED_ZERO, sizeof(ZERO));
+  const charT ZERO_CHART = 0;
+  const TBuffer ZERO_TBUFFER = 0;
+  os.write(reinterpret_cast<const char *>(&ZERO_CHART), sizeof(charT));
+  os.write(reinterpret_cast<const char *>(&ZERO_TBUFFER), sizeof(TBuffer));
+}
 
+template <class TBuffer, class charT>
+void compress_stream(std::basic_istream<charT> &is, std::ostream &os,
+                     const std::map<charT, symbol_range<TBuffer>> &symbols) {
   TBuffer upper_bound = std::numeric_limits<TBuffer>::max();
   TBuffer lower_bound = 0, buffer = 0;
-  int pending_count = 0, buffer_count = 0, in_size = cumulative_lower_bound;
+  int pending_count = 0, buffer_count = 0;
+  TBuffer in_size = symbols.rbegin()->second.upper;
   const int buffer_bits = std::numeric_limits<TBuffer>::digits;
   TBuffer first_bit = static_cast<TBuffer>(0x1U) << (buffer_bits - 1);
   TBuffer second_bit = first_bit >> 1;
+  std::string magic{0x1B, 'd', 'a', 't', static_cast<char>(buffer_bits)};
+  os.write(magic.data(), 5);
 
   // debugging variables
   STUB(int max_bit_count = 0);
 
-  is.clear();
-  is.seekg(0, is.beg);
-
+  std::cerr << std::showbase << std::hex << std::internal << std::setfill('0');
+  charT current;
   while (is.get(current)) {
     // generate the range and bounds for selected symbol at this depth in the
     // file
     TBuffer range = upper_bound - lower_bound;
-    upper_bound = lower_bound + (range / in_size * symbols[current].upper);
-    lower_bound += range / in_size * symbols[current].lower;
+    upper_bound = lower_bound + (range / in_size * symbols.at(current).upper);
+    lower_bound += range / in_size * symbols.at(current).lower;
 
     DEBUGF('z', "NEXT SYMBOL: " << std::setw(4) << (current & 0xFFU)
                                 << "; RANGE: [" << std::setw(10) << lower_bound
@@ -176,21 +195,31 @@ void compress_stream(std::basic_istream<charT> &is, std::ostream &os) {
 }
 
 template <class TBuffer, class charT>
-void decompress_stream(std::istream &is, std::basic_ostream<charT> &os) {
-  std::map<charT, symbol_range<TBuffer>> symbols;
-  TBuffer occurrences;
-  charT symbol;
-
-  // also serves as the total number of characters in the original file
-  TBuffer cumulative_lower_bound = 0;
+std::map<charT, symbol_range<TBuffer>> read_table(std::istream &is) {
   std::cerr << std::hex << std::showbase << std::internal << std::setfill('0');
+  std::map<charT, symbol_range<TBuffer>> symbols;
+
+  charT symbol;
+  TBuffer cumulative_lower_bound = 0;
   DEBUGF('t', "READING TABLE");
+
+  char magic[6];
+  magic[5] = 0;
+  is.read(magic, 5);
+  std::string check{0x1B, 't', 'a', 'b',
+                    static_cast<char>(std::numeric_limits<TBuffer>::digits)};
+  if (check.compare(magic) != 0) {
+    std::cerr << "Error: stream contained invalid table; header does not match "
+              << "expected value." << std::endl;
+    std::cerr << "Expected value: " << check << " Actual value: " << magic
+              << std::endl;
+    return symbols;
+  }
+
   while (is.read(reinterpret_cast<char *>(&symbol), sizeof(symbol))) {
-    is.read(reinterpret_cast<char *>(&occurrences), sizeof(TBuffer));
-
-    // table has ended
+    TBuffer occurrences;
+    is.read(reinterpret_cast<char *>(&occurrences), sizeof(occurrences));
     if (occurrences == 0) break;
-
     DEBUGF('t', "    SYMBOL: " << std::setw(4) << (symbol & 0xFFU)
                                << "; UNADJUSTED BOUNDS: [" << std::setw(10)
                                << cumulative_lower_bound << ", "
@@ -201,38 +230,60 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os) {
                        cumulative_lower_bound};
     cumulative_lower_bound += occurrences;
   }
-
-  DEBUGF('y', "Total characters: " << std::dec << cumulative_lower_bound
+  DEBUGF('y', "Total characters: " << std::dec << symbols.rbegin()->second.upper
                                    << std::hex);
+  return symbols;
+}
 
+template <class TBuffer, class charT>
+void decompress_stream(std::istream &is, std::basic_ostream<charT> &os,
+                       const std::map<charT, symbol_range<TBuffer>> &symbols) {
+  std::cerr << std::hex << std::showbase << std::internal << std::setfill('0');
   TBuffer upper_bound = std::numeric_limits<TBuffer>::max();
   TBuffer lower_bound = 0, characters_written = 0, buffer, encoding;
-  TBuffer out_size = cumulative_lower_bound;
-  int pending_count = 0, buffer_count = 0;
+  TBuffer out_size = symbols.rbegin()->second.upper;
+  int pending_count = 0;
   int buffer_bits = std::numeric_limits<TBuffer>::digits;
+  int buffer_count = buffer_bits;
   TBuffer first_bit = static_cast<TBuffer>(0x1U) << (buffer_bits - 1);
   TBuffer second_bit = first_bit >> 1;
 
-  // fill encoding and buffer
+  char magic[6];
+  magic[5] = 0;
+  is.read(magic, 5);
+  std::string check{0x1B, 'd', 'a', 't',
+                    static_cast<char>(std::numeric_limits<TBuffer>::digits)};
+  if (check.compare(magic) != 0) {
+    std::cerr << "Error: stream contained invalid table; header does not match "
+              << "expected value." << std::endl;
+    std::cerr << "Expected value: " << check << " Actual value: " << magic
+              << std::endl;
+    return;
+  }
+
+  // fill encoding
   is.read(reinterpret_cast<char *>(&encoding), sizeof(encoding));
-  is.read(reinterpret_cast<char *>(&buffer), sizeof(buffer));
+  DEBUGF('b', "ENCODING START: " << std::setw(10) << encoding);
   for (;;) {
     TBuffer range = upper_bound - lower_bound;
     charT current;
 
-    DEBUGF('c', "SCANNING FOR SYMBOLS THAT COULD HAVE BEEN ENCODED WITH "
+    DEBUGF('e', "SCANNING FOR SYMBOLS THAT COULD HAVE BEEN ENCODED WITH "
                     << std::setw(10) << encoding);
     for (auto &x : symbols) {
       // computes what the bounds would be given that x was encoded
       // and sees if the actual encoding falls within them
       TBuffer upper_given_x = lower_bound + (range / out_size * x.second.upper);
       TBuffer lower_given_x = lower_bound + (range / out_size * x.second.lower);
+      DEBUGF('v', "    SYMBOL: " << std::setw(4) << (x.first & 0xFFU)
+                                 << "; POSSIBLE RANGE: [" << std::setw(10)
+                                 << lower_given_x << ", " << std::setw(10)
+                                 << upper_given_x << ")");
 
       if (encoding < upper_given_x && encoding >= lower_given_x) {
         current = x.first;
-        --x.second.occurrences;
-        DEBUGF('c', "    CHARACTER " << std::setw(4) << (current & 0xFFU)
-                                     << " BOUNDS THE ENCODING");
+        DEBUGF('e', "    SYMBOL " << std::setw(4) << (current & 0xFFU)
+                                  << " BOUNDS THE ENCODING");
       }
     }
 
@@ -240,8 +291,8 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os) {
     ++characters_written;
     if (characters_written >= out_size) return;
 
-    upper_bound = lower_bound + (range / out_size * symbols[current].upper);
-    lower_bound += range / out_size * symbols[current].lower;
+    upper_bound = lower_bound + (range / out_size * symbols.at(current).upper);
+    lower_bound += range / out_size * symbols.at(current).lower;
 
     DEBUGF('z', "NEXT SYMBOL: " << std::setw(4) << (current & 0xFFU)
                                 << "; RANGE: [" << std::setw(10) << lower_bound
@@ -252,6 +303,17 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os) {
     STUB(int bit_count = 0);
     // remove matching or pending bits
     for (;;) {
+      // refreshes buffer if all bits have been read
+      if (buffer_count >= buffer_bits) {
+        if (is.rdstate() & std::ifstream::eofbit) {
+          buffer = 0;
+        } else {
+          is.read(reinterpret_cast<char *>(&buffer), sizeof(buffer));
+          DEBUGF('b', "BUFFER EMPTY; READING: " << std::setw(10) << buffer);
+          buffer_count = 0;
+        }
+      }
+
       if ((upper_bound ^ lower_bound) < first_bit) {
         // first bit matches
         TBuffer msb = lower_bound >> (buffer_bits - 1);
@@ -301,16 +363,6 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os) {
                         << "    LENGTH: " << std::dec << bit_count << std::endl
                         << "    PENDING: " << pending_count << std::hex);
         break;
-      }
-
-      // refreshes buffer if all bits have been read
-      if (buffer_count >= buffer_bits) {
-        if (is.rdstate() & std::ifstream::eofbit) {
-          buffer = 0;
-        } else {
-          is.read(reinterpret_cast<char *>(&buffer), sizeof(buffer));
-          buffer_count = 0;
-        }
       }
     }
   }

@@ -36,6 +36,37 @@ This means that the unadjusted ranges for each character cannot be pulled from
 a map each time. They must be recalculated each time a character is encoded or
 decoded.
 
+# Improved two pass approach
+Since there is no guarantee that we will be able to seek a stream to read its
+contents multiple times, the user should be required to explicitly build the
+map before encoding or decoding the stream.
+
+The two pass encode and decode methods will not write the table to the output;
+the user must also perform another call to do that, to allow tables to be stored
+separately from the data.
+
+To make it easy to determine whether or not a file has been encoded with a table
+prepended to it, we will need to do the following:
+1. Have a "Beginning of encoding" marker, which will be a sequence of bytes.
+2. Have an explicit "End of encoding" character, which receives its own table
+   entry.
+3. Have a "End of table" marker, so that the table reader does not interpret any
+   of the encoded data as table entries.
+4. Optionally, have a "Beginning of table" marker. This could also just be a
+   magic number, and the presence of a table in the stream determined by 
+
+# Two pass dynamic approach
+This approach is the same as above, except that instead of using static values
+when encoding the data, after encoding each character, the occurrenc count for
+that character is decremented, so that the probability ranges are exact at each
+location in the stream.
+
+This scheme may need a different function, since ideally in the static two pass
+approach, the map argument would be a constant reference to avoid copies. That
+wouldn't be possible here, since we must modify the map. Alternatively, this
+scheme could construct a second map that holds the number of each character that
+has already been encoded, which is subtracted from the original character map.
+
 # Understanding stream iterators
 Stream iterators require a single template argument `T`, which is the type that
 the contents of the stream will be converted to (for `istreams`) or from (for

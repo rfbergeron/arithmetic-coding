@@ -54,7 +54,8 @@ int main(int argc, char **argv) {
       return 1;
     }
 
-    decompress_stream<uint32_t>(instream, outstream);
+    auto table = read_table<uint32_t, char>(instream);
+    decompress_stream(instream, outstream, table);
   } else if (command.compare("encode") == 0) {
     std::ifstream instream(file1);
     if ((instream.rdstate() & std::ifstream::failbit) != 0) {
@@ -68,7 +69,11 @@ int main(int argc, char **argv) {
       return 1;
     }
 
-    compress_stream<uint32_t>(instream, outstream);
+    auto table = build_table<uint32_t>(instream);
+    instream.clear();
+    instream.seekg(0, std::ifstream::beg);
+    write_table(outstream, table);
+    compress_stream(instream, outstream, table);
   } else {
     std::cerr
         << "Usage: ./arcode [- @ flag]... encode|decode \'infile\' \'outfile\'"
