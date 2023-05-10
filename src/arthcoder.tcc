@@ -242,7 +242,7 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os,
   TBuffer upper_bound = std::numeric_limits<TBuffer>::max();
   TBuffer lower_bound = 0, characters_written = 0, buffer, encoding;
   TBuffer out_size = symbols.rbegin()->second.upper;
-  int pending_count = 0;
+  STUB(int pending_count = 0);
   int buffer_bits = std::numeric_limits<TBuffer>::digits;
   int buffer_count = buffer_bits;
   TBuffer first_bit = static_cast<TBuffer>(0x1U) << (buffer_bits - 1);
@@ -316,7 +316,6 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os,
 
       if ((upper_bound ^ lower_bound) < first_bit) {
         // first bit matches
-        TBuffer msb = lower_bound >> (buffer_bits - 1);
         lower_bound <<= 1;
         upper_bound <<= 1;
         upper_bound |= static_cast<TBuffer>(0x1U);
@@ -325,7 +324,8 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os,
         buffer <<= 1;
         encoding |= current_bit;
         ++buffer_count;
-        STUB(++bit_count; debug_buffer <<= 1; debug_buffer |= msb;
+        STUB(TBuffer msb = lower_bound >> (buffer_bits - 1); ++bit_count;
+             debug_buffer <<= 1; debug_buffer |= msb;
              while (pending_count > 0) {
                debug_buffer <<= 1;
                debug_buffer |= msb ^ static_cast<TBuffer>(0x1U);

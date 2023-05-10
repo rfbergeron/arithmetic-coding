@@ -1,0 +1,5 @@
+**/gmon.out
+**.o
+**/.ccls
+build/**
+test/**

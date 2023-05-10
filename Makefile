@@ -1,45 +1,49 @@
-GPPWARN     = -Wall -Wextra -Werror -Wpedantic -Wshadow -Wold-style-cast
-GPPOPTS     = ${GPPWARN}
-COMPILECPP  = g++ -ggdb -std=c++17
-MAKEDEPCPP  = g++ -std=c++17 -MM ${GPPOPTS}
+CWARN ::= -Wall -Wextra -Wpedantic -Wno-shadow
+CFLAGS ::= -std=c++17
+EXE ::= build/arcode
+SRC ::= src/main.cpp src/debug.cpp
+HDR ::= src/debug.h src/arthcoder.h
+TPL ::= src/arthcoder.tcc
+OBJ ::= ${SRC:src/%.cpp=build/%.o}
 
-EXECBIN     = arcode
-ALLMODS     = ${MODULES} ${EXECBIN}
-SOURCELIST  = ${foreach MOD, ${ALLMODS}, ${MOD}.h ${MOD}.tcc ${MOD}.cpp}
-ALLSOURCE   = ${wildcard ${SOURCELIST}} ${MKFILE}
-CPPSOURCE   = ${wildcard ${MODULES:=.cpp}}
-SOURCES     = main.cpp debug.cpp
-HEADERS     = debug.h arthcoder.h
-TEMPLATES   = arthcoder.tcc
-OBJECTS     = main.o debug.o
-CLEANOBJS   = ${OBJLIBS} ${EXECBIN}
+.PHONY: all debug sanitize clean format again test ci check
 
-all: ${EXECBIN}
+all: CFLAGS += -O2 -DNDEBUG
+all: build ${EXE}
 
-${EXECBIN} : ${OBJECTS}
-	${COMPILECPP} -o $@ ${OBJECTS}
+sanitize: CFLAGS += -O2 -DNDEBUG -fsanitize=address,undefined
+sanitize: build ${EXE}
 
-gdb : ${OBJECTS}
-	${COMPILECPP} -DNDEBUG -o ${EXECBIN} ${OBJECTS}
+debug: CFLAGS += -Og -p -g -fsanitize=address,undefined -fstack-protector-all
+debug: build ${EXE}
 
-%.o: %.cpp ${HEADERS} ${TEMPLATES}
-	${COMPILECPP} -c $< ${HEADERS}
+build:
+	mkdir -p $@
+
+${EXE} : ${OBJ}
+	${CXX} ${CFLAGS} ${LDFLAGS} ${CWARN} -o $@ $^
+
+build/%.o: src/%.cpp ${HDR} ${TPL}
+	${CXX} ${CFLAGS} ${CWARN} -o $@ -c $<
 
 clean:
-	- rm ${OBJECTS} ${EXECBIN}
-	${GMAKE} rmtest
+	rm -f ${OBJ} ${EXE}
 
-rmtest:
-	- ./cleardata.sh
-
-again: ${SOURCES} ${HEADERS} ${TEMPLATES}
-	${GMAKE} clean all
+again:
+	${MAKE} clean all
 
 test:
-	- ./arcode encode entropy entropy.yeet
-	- ./arcode encode 0p3r4t0r 0p3r4t0r.yeet
-	- ./arcode decode entropy.yeet entropy.decode
-	- ./arcode decode 0p3r4t0r.yeet 0p3r4t0r.decode
+	./test.sh
+
+clean-test:
+	./clean-test.sh
 
 format:
-	- clang-format -i --style=Google ${SOURCES} ${HEADERS} ${TEMPLATES}
+	clang-format -i --style=Google ${SRC} ${HDR} ${TPL}
+
+check:
+	clang-format --Werror --dry-run --style=Google ${SRC} ${HDR} ${TPL}
+
+ci:
+	${MAKE} check
+	git add ${SRC} ${HDR} ${TPL} Makefile test.sh clean-test.sh .gitignore
