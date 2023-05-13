@@ -1,3 +1,4 @@
+#include <cassert>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -27,7 +28,6 @@ std::map<charT, symbol_range<TBuffer>> build_table(
         x.second.lower + x.second.occurrences;
   }
 
-  DEBUGF('t', "PLAINTEXT LENGTH: " << symbols.rbegin()->second.upper);
   return symbols;
 }
 
@@ -57,6 +57,8 @@ void write_table(std::ostream &os,
   const TBuffer ZERO_TBUFFER = 0;
   os.write(reinterpret_cast<const char *>(&ZERO_CHART), sizeof(charT));
   os.write(reinterpret_cast<const char *>(&ZERO_TBUFFER), sizeof(TBuffer));
+  DEBUGF('t',
+         "PLAINTEXT LENGTH: " << std::dec << symbols.rbegin()->second.upper);
 }
 
 template <class TBuffer, class charT>
@@ -66,6 +68,8 @@ void compress_stream(std::basic_istream<charT> &is, std::ostream &os,
   TBuffer lower_bound = 0, buffer = 0;
   int pending_count = 0, buffer_count = 0;
   TBuffer in_size = symbols.rbegin()->second.upper;
+  charT lowest_char = symbols.begin()->first;
+  assert(symbols.begin()->second.lower == 0);
   const int buffer_bits = std::numeric_limits<TBuffer>::digits;
   TBuffer first_bit = static_cast<TBuffer>(0x1U) << (buffer_bits - 1);
   TBuffer second_bit = first_bit >> 1;
@@ -74,19 +78,38 @@ void compress_stream(std::basic_istream<charT> &is, std::ostream &os,
 
   // debugging variables
   STUB(int max_bit_count = 0);
+  STUB(size_t characters_written = 0);
+  STUB(std::cerr << std::showbase << std::hex << std::internal
+                 << std::setfill('0'));
 
-  std::cerr << std::showbase << std::hex << std::internal << std::setfill('0');
   charT current;
-  while (is.get(current)) {
+  while (is.get(current) ||
+         (current = lowest_char, buffer_count > 0 || pending_count > 0)) {
     // generate the range and bounds for selected symbol at this depth in the
     // file
     TBuffer range = upper_bound - lower_bound;
     upper_bound = lower_bound + (range / in_size * symbols.at(current).upper);
     lower_bound += range / in_size * symbols.at(current).lower;
-
-    DEBUGF('z', "NEXT SYMBOL: " << std::setw(4) << (current & 0xFFU)
+    STUB(
+        if (is.eof() && buffer_count > 0) {
+          DEBUGF('z', "LEFTOVER BUFFER; PADDING WITH SYMBOL: "
+                          << std::setw(4) << (current & 0xFFU) << "; RANGE: ["
+                          << std::setw(10) << lower_bound << ", "
+                          << std::setw(10) << upper_bound
+                          << "); BITS UNTIL FULL: " << std::noshowbase
+                          << std::dec << buffer_bits - buffer_count
+                          << std::showbase << std::hex);
+        } else if (is.eof() && pending_count > 0) {
+          DEBUGF('z', "LEFTOVER PENDING; PADDING WITH SYMBOL: "
+                          << std::setw(4) << (current & 0xFFU) << "; RANGE: ["
+                          << std::setw(10) << lower_bound << ", "
+                          << std::setw(10) << upper_bound << ")");
+        } else if (is.eof()) { abort(); } else {
+          DEBUGF('z', "SYMBOL " << std::dec << characters_written << ": "
+                                << std::hex << std::setw(4) << (current & 0xFFU)
                                 << "; RANGE: [" << std::setw(10) << lower_bound
                                 << ", " << std::setw(10) << upper_bound << ")");
+        });
 
     // debugging variables
     STUB(TBuffer debug_buffer = 0);
@@ -101,6 +124,7 @@ void compress_stream(std::basic_istream<charT> &is, std::ostream &os,
           const char *casted_buffer = reinterpret_cast<const char *>(&buffer);
           os.write(casted_buffer, sizeof(buffer));
           buffer = buffer_count = 0;
+          if (is.eof() && pending_count == 0) break;
         }
 
         // write msb to the end of the buffer
@@ -122,13 +146,7 @@ void compress_stream(std::basic_istream<charT> &is, std::ostream &os,
         // add pending bits to the buffer, writing to the output stream whenever
         // if gets full
         TBuffer pending_bit = msb ^ static_cast<TBuffer>(0x1U);
-        STUB(if (pending_count > 0) {
-          DEBUGF('p', std::noshowbase
-                          << std::dec << std::setfill(' ') << "    FLUSHING "
-                          << std::setw(2) << pending_count
-                          << " PENDING BITS WITH VALUE " << pending_bit
-                          << std::showbase << std::hex << std::setfill('0'));
-        } ++bit_count;);
+        STUB(++bit_count);
         while (pending_count > 0) {
           if (buffer_count >= buffer_bits) {
             DEBUGF('b', "        BUFFER FULL; FLUSHING: " << std::setw(10)
@@ -137,12 +155,16 @@ void compress_stream(std::basic_istream<charT> &is, std::ostream &os,
             os.write(casted_buffer, sizeof(buffer));
             buffer = buffer_count = 0;
           }
+          DEBUGF('p', "    PENDING BIT: " << std::noshowbase << pending_bit
+                                          << std::showbase);
           buffer <<= 1;
           buffer |= pending_bit;
           ++buffer_count;
           --pending_count;
-          STUB(++bit_count; debug_buffer <<= 1; debug_buffer |= pending_bit;);
+          STUB((++bit_count, debug_buffer <<= 1, debug_buffer |= pending_bit));
         }
+
+        if (is.eof() && buffer_count == 0) break;
       } else if (lower_bound >= second_bit &&
                  upper_bound < (first_bit | second_bit)) {
         // pending bits, indicated by the first bits of the upper and lower
@@ -156,42 +178,31 @@ void compress_stream(std::basic_istream<charT> &is, std::ostream &os,
         upper_bound |= first_bit | static_cast<TBuffer>(0x1U);
         ++pending_count;
       } else {
-        DEBUGF('z', "BITS DISCARDED: " << std::dec << std::setw(2) << bit_count
+        DEBUGF('z', "BITS DISCARDED: " << std::dec << std::setw(4) << bit_count
                                        << std::hex << "; VALUE: "
                                        << std::setw(10) << debug_buffer);
-        DEBUGF('e', "ENCODING COMPLETED:"
-                        << std::endl
-                        << "    CHARACTER: " << std::setw(4)
-                        << (current & 0xFFU) << std::endl
-                        << "    ENCODING: " << std::setw(10)
-                        << (debug_buffer << (buffer_bits - bit_count))
-                        << std::endl
-                        << "    LENGTH: " << std::dec << bit_count << std::endl
-                        << "    PENDING: " << pending_count << std::hex);
+        DEBUGF('e',
+               "ENCODING COMPLETED:"
+                   << std::endl
+                   << "    CHARACTER: " << std::setw(4) << (current & 0xFFU)
+                   << std::endl
+                   << "    ENCODING: " << std::setw(10)
+                   << (bit_count > 0 ? debug_buffer << (buffer_bits - bit_count)
+                                     : debug_buffer)
+                   << std::endl
+                   << "    LENGTH: " << std::dec << bit_count << std::endl
+                   << "    PENDING: " << pending_count << std::hex);
         STUB(max_bit_count = std::max(max_bit_count, bit_count));
+        STUB(++characters_written);
         break;
       }
     }
   }
 
-  // fill out the buffer with the high order bits of the lower bound, then write
-  // the rest of the bits of the lower bound shifted as far left as possible
-  if (buffer_count > 0) {
-    int bits_needed = buffer_bits - buffer_count;
-    DEBUGF('b', std::noshowbase << std::dec << "PADDING BUFFER WITH "
-                                << bits_needed << " BITS" << std::showbase
-                                << std::hex);
-    buffer <<= bits_needed;
-    buffer |= lower_bound >> buffer_count;
-    lower_bound <<= bits_needed;
-    DEBUGF('b', "FINAL BUFFER: " << std::setw(10) << buffer);
-    DEBUGF('b', "FINAL LOWER BOUND: " << std::setw(10) << lower_bound);
-    const char *casted_buffer = reinterpret_cast<const char *>(&buffer);
-    os.write(casted_buffer, sizeof(buffer));
-    const char *casted_lower_bound =
-        reinterpret_cast<const char *>(&lower_bound);
-    os.write(casted_lower_bound, sizeof(lower_bound));
-  }
+  // write the lower bound; it may be needed to decode the last character
+  DEBUGF('b',
+         "DATA END; WRITING LOWER BOUND: " << std::setw(10) << lower_bound);
+  os.write(reinterpret_cast<const char *>(&lower_bound), sizeof(lower_bound));
 }
 
 template <class TBuffer, class charT>
@@ -230,21 +241,26 @@ std::map<charT, symbol_range<TBuffer>> read_table(std::istream &is) {
                        cumulative_lower_bound};
     cumulative_lower_bound += occurrences;
   }
-  DEBUGF('y', "Total characters: " << std::dec << symbols.rbegin()->second.upper
-                                   << std::hex);
+  DEBUGF('t',
+         "PLAINTEXT LENGTH: " << std::dec << symbols.rbegin()->second.upper);
   return symbols;
 }
 
+// note: unlike `compress_stream`, the `buffer` variable does not represent the
+// current set of encoding bits being processed; rather, it is a secondary
+// buffer that holds additional bits that are shifted in the primary buffer, the
+// `encoding` variable, so that whenever the table is scanned, `encoding` is
+// full, which is needed to get accurate comparisons.
 template <class TBuffer, class charT>
 void decompress_stream(std::istream &is, std::basic_ostream<charT> &os,
                        const std::map<charT, symbol_range<TBuffer>> &symbols) {
   std::cerr << std::hex << std::showbase << std::internal << std::setfill('0');
   TBuffer upper_bound = std::numeric_limits<TBuffer>::max();
-  TBuffer lower_bound = 0, characters_written = 0, buffer, encoding;
+  TBuffer lower_bound = 0, buffer, encoding;
+  size_t characters_written = 0;
   TBuffer out_size = symbols.rbegin()->second.upper;
-  STUB(int pending_count = 0);
   int buffer_bits = std::numeric_limits<TBuffer>::digits;
-  int buffer_count = buffer_bits;
+  int buffer_count = 0;
   TBuffer first_bit = static_cast<TBuffer>(0x1U) << (buffer_bits - 1);
   TBuffer second_bit = first_bit >> 1;
 
@@ -261,29 +277,27 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os,
     return;
   }
 
+  STUB(int pending_count = 0);
   // fill encoding
   is.read(reinterpret_cast<char *>(&encoding), sizeof(encoding));
-  DEBUGF('b', "ENCODING START: " << std::setw(10) << encoding);
   for (;;) {
     TBuffer range = upper_bound - lower_bound;
     charT current;
 
-    DEBUGF('e', "SCANNING FOR SYMBOLS THAT COULD HAVE BEEN ENCODED WITH "
-                    << std::setw(10) << encoding);
     for (auto &x : symbols) {
       // computes what the bounds would be given that x was encoded
       // and sees if the actual encoding falls within them
       TBuffer upper_given_x = lower_bound + (range / out_size * x.second.upper);
       TBuffer lower_given_x = lower_bound + (range / out_size * x.second.lower);
-      DEBUGF('v', "    SYMBOL: " << std::setw(4) << (x.first & 0xFFU)
-                                 << "; POSSIBLE RANGE: [" << std::setw(10)
-                                 << lower_given_x << ", " << std::setw(10)
-                                 << upper_given_x << ")");
 
       if (encoding < upper_given_x && encoding >= lower_given_x) {
         current = x.first;
-        DEBUGF('e', "    SYMBOL " << std::setw(4) << (current & 0xFFU)
-                                  << " BOUNDS THE ENCODING");
+        DEBUGF('z', "SYMBOL " << std::dec << characters_written << std::hex
+                              << ": " << std::setw(4) << (current & 0xFFU)
+                              << "; RANGE: [" << std::setw(10) << lower_given_x
+                              << ", " << std::setw(10) << upper_given_x
+                              << "); ENCODING: " << std::setw(10) << encoding);
+        break;
       }
     }
 
@@ -294,28 +308,30 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os,
     upper_bound = lower_bound + (range / out_size * symbols.at(current).upper);
     lower_bound += range / out_size * symbols.at(current).lower;
 
-    DEBUGF('z', "NEXT SYMBOL: " << std::setw(4) << (current & 0xFFU)
-                                << "; RANGE: [" << std::setw(10) << lower_bound
-                                << ", " << std::setw(10) << upper_bound << ")");
-
     // debug variables
     STUB(TBuffer debug_buffer = 0);
     STUB(int bit_count = 0);
     // remove matching or pending bits
     for (;;) {
       // refreshes buffer if all bits have been read
-      if (buffer_count >= buffer_bits) {
-        if (is.rdstate() & std::ifstream::eofbit) {
-          buffer = 0;
-        } else {
-          is.read(reinterpret_cast<char *>(&buffer), sizeof(buffer));
-          DEBUGF('b', "BUFFER EMPTY; READING: " << std::setw(10) << buffer);
-          buffer_count = 0;
-        }
+      if (buffer_count == 0) {
+        is.read(reinterpret_cast<char *>(&buffer), sizeof(buffer));
+        buffer_count = buffer_bits;
+        if (is.eof()) buffer = second_bit;
+        STUB(
+            if (is.eof()) {
+              DEBUGF('b', "ENCODING END; FILLING BUFFER WITH LOWER BOUND: "
+                              << buffer);
+            } else {
+              DEBUGF('b', "BUFFER EMPTY; READING: " << std::setw(10) << buffer);
+            });
       }
 
       if ((upper_bound ^ lower_bound) < first_bit) {
         // first bit matches
+        STUB(TBuffer msb = lower_bound >> (buffer_bits - 1));
+        DEBUGF('x', "    MOST SIGNIFICANT BIT: " << std::noshowbase << msb
+                                                 << std::showbase);
         lower_bound <<= 1;
         upper_bound <<= 1;
         upper_bound |= static_cast<TBuffer>(0x1U);
@@ -323,15 +339,17 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os,
         TBuffer current_bit = (buffer & first_bit) >> (buffer_bits - 1);
         buffer <<= 1;
         encoding |= current_bit;
-        ++buffer_count;
-        STUB(TBuffer msb = lower_bound >> (buffer_bits - 1); ++bit_count;
-             debug_buffer <<= 1; debug_buffer |= msb;
-             while (pending_count > 0) {
-               debug_buffer <<= 1;
-               debug_buffer |= msb ^ static_cast<TBuffer>(0x1U);
-               --pending_count;
-               ++bit_count;
-             });
+        --buffer_count;
+        STUB((++bit_count, debug_buffer = (debug_buffer << 1) | msb));
+        STUB(while (pending_count > 0) {
+          DEBUGF('p', "    PENDING BIT: " << std::noshowbase
+                                          << (msb ^ static_cast<TBuffer>(0x1U))
+                                          << std::showbase);
+          debug_buffer =
+              (debug_buffer << 1) | (msb ^ static_cast<TBuffer>(0x1U));
+          --pending_count;
+          ++bit_count;
+        });
       } else if (lower_bound >= second_bit &&
                  upper_bound < (first_bit | second_bit)) {
         // pending bits
@@ -347,21 +365,23 @@ void decompress_stream(std::istream &is, std::basic_ostream<charT> &os,
         TBuffer current_bit = (buffer & first_bit) >> (buffer_bits - 1);
         buffer <<= 1;
         encoding |= current_bit;
-        ++buffer_count;
+        --buffer_count;
         STUB(++pending_count);
       } else {
-        DEBUGF('z', "BITS DISCARDED: " << std::dec << std::setw(2) << bit_count
+        DEBUGF('z', "BITS DISCARDED: " << std::dec << std::setw(4) << bit_count
                                        << std::hex << "; VALUE: "
                                        << std::setw(10) << debug_buffer);
-        DEBUGF('e', "DECODING COMPLETED:"
-                        << std::endl
-                        << "    CHARACTER: " << std::setw(4)
-                        << (current & 0xFFU) << std::endl
-                        << "    ENCODING: " << std::setw(10)
-                        << (debug_buffer << (buffer_bits - bit_count))
-                        << std::endl
-                        << "    LENGTH: " << std::dec << bit_count << std::endl
-                        << "    PENDING: " << pending_count << std::hex);
+        DEBUGF('e',
+               "DECODING COMPLETED:"
+                   << std::endl
+                   << "    CHARACTER: " << std::setw(4) << (current & 0xFFU)
+                   << std::endl
+                   << "    ENCODING: " << std::setw(10)
+                   << (bit_count > 0 ? debug_buffer << (buffer_bits - bit_count)
+                                     : debug_buffer)
+                   << std::endl
+                   << "    LENGTH: " << std::dec << bit_count << std::endl
+                   << "    PENDING: " << pending_count << std::hex);
         break;
       }
     }

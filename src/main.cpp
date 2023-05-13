@@ -42,14 +42,16 @@ int main(int argc, char **argv) {
   std::string file2{argv[optind + 2]};
 
   if (command.compare("decode") == 0) {
-    std::ifstream instream(file1, std::ifstream::binary | std::ifstream::in);
-    if ((instream.rdstate() & std::ifstream::failbit) != 0) {
+    // note: i believe all constructors from the STL set the in/out mode bits
+    // appropriately for streams, so there's no need to specify them here
+    std::ifstream instream(file1, std::ios_base::binary);
+    if (instream.fail()) {
       std::cerr << "Failed to open file " << file1 << std::endl;
       return 1;
     }
 
-    std::ofstream outstream(file2);
-    if ((outstream.rdstate() & std::ofstream::failbit) != 0) {
+    std::ofstream outstream(file2, std::ios_base::binary);
+    if (outstream.fail()) {
       std::cerr << "Failed to open file " << file2 << std::endl;
       return 1;
     }
@@ -57,21 +59,21 @@ int main(int argc, char **argv) {
     auto table = read_table<uint32_t, char>(instream);
     decompress_stream(instream, outstream, table);
   } else if (command.compare("encode") == 0) {
-    std::ifstream instream(file1);
-    if ((instream.rdstate() & std::ifstream::failbit) != 0) {
+    std::ifstream instream(file1, std::ios_base::binary);
+    if (instream.fail()) {
       std::cerr << "Failed to open file " << file1 << std::endl;
       return 1;
     }
 
-    std::ofstream outstream(file2, std::ofstream::binary | std::ofstream::out);
-    if ((outstream.rdstate() & std::ofstream::failbit) != 0) {
+    std::ofstream outstream(file2, std::ios_base::binary);
+    if (outstream.fail()) {
       std::cerr << "Failed to open file " << file2 << std::endl;
       return 1;
     }
 
     auto table = build_table<uint32_t>(instream);
     instream.clear();
-    instream.seekg(0, std::ifstream::beg);
+    instream.seekg(0, std::ios_base::beg);
     write_table(outstream, table);
     compress_stream(instream, outstream, table);
   } else {
